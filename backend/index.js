@@ -689,6 +689,123 @@ app.post('/api/watchers/:id/run', async (req, res) => {
   res.json(r);
 });
 
+// ---------- Module G2: INSTANT folder watchers (file ate hi foran upload + delete) ----------
+// Folder queue ki tarah kaam karta hai: jo file mojood hai wo upload hogi.
+// Stability check: copy hoti file (size badal raha ho) skip — agli scan me pakri jayegi.
+const fileSeen = new Map(); // path -> {size, t}
+const instantBusy = new Set(); // watcher ids currently processing
+function isStable(fp) {
+  try {
+    const size = fs.statSync(fp).size;
+    const now = Date.now();
+    const prev = fileSeen.get(fp);
+    fileSeen.set(fp, { size, t: now });
+    if (!prev) return false; // pehli dafa dekha — agli scan me stable hoga
+    if (prev.size !== size) return false; // abhi copy ho rahi hai
+    return true;
+  } catch { return false; }
+}
+setInterval(() => {
+  // purani entries saaf (memory leak se bachao)
+  const now = Date.now();
+  for (const [k, v] of fileSeen) if (now - v.t > 10 * 60 * 1000) fileSeen.delete(k);
+}, 5 * 60 * 1000);
+
+async function processInstant(w) {
+  if (instantBusy.has(w.id)) return { ok: true, uploaded: 0, skipped: 'busy' };
+  instantBusy.add(w.id);
+  try {
+    const page = db.prepare('SELECT * FROM pages WHERE id=?').get(w.page_id);
+    if (!page) return { ok: false, error: 'Page not found' };
+    if (!page.page_token) return { ok: false, error: 'Page ka posting access nahi' };
+    if (!fs.existsSync(w.folder_path) || !fs.statSync(w.folder_path).isDirectory())
+      return { ok: false, error: 'Folder nahi mila' };
+    const stable = listMediaFiles(w.folder_path).filter((f) => isStable(f.path));
+    if (!stable.length) return { ok: true, uploaded: 0 };
+    const batch = stable.slice(0, Math.max(1, Math.min(20, w.per_scan || 5)));
+    let done = 0;
+    for (const f of batch) {
+      const isV = isVideoFile({ path: f.path });
+      const caption = String(w.caption_template || '{filename}').replace('{filename}', path.parse(f.name).name);
+      try {
+        const mode = isV ? (w.post_as === 'feed' ? 'feed' : 'reel') : 'feed';
+        const out = await publishFilesNow(page, {
+          message: caption,
+          files: [{ path: f.path, mimetype: isV ? 'video/mp4' : 'image/jpeg', originalname: f.name }],
+          post_as: mode,
+        });
+        const fbId = out.fb.id || out.fb.post_id || '';
+        if (!fbId) throw new Error('FB id nahi mila');
+        db.prepare(`INSERT INTO posts (fb_post_id,page_id,message,type,status,file_paths,post_as,insights_json,created_at)
+          VALUES (?,?,?,?,?,?,?,?,?)`).run(
+          fbId, page.id, caption, isV ? (mode === 'reel' ? 'reel' : 'video') : 'photo',
+          'published', '[]', mode, '{}', new Date().toISOString()
+        );
+        fs.unlinkSync(f.path); // delete SIRF record ke baad
+        fileSeen.delete(f.path);
+        log('instant_published', `${page.name}: ${f.name} (fb:${fbId}) — file deleted`);
+        done++;
+      } catch (e) {
+        log('instant_failed', `${f.name}: ${(e.message || JSON.stringify(fb.fbErr(e))).slice(0, 150)}`);
+        break;
+      }
+    }
+    db.prepare('UPDATE instant_watchers SET last_scan=? WHERE id=?').run(new Date().toISOString(), w.id);
+    return { ok: true, uploaded: done };
+  } finally {
+    instantBusy.delete(w.id);
+  }
+}
+
+app.get('/api/instant', (req, res) => {
+  const list = db.prepare('SELECT * FROM instant_watchers ORDER BY id DESC').all().map((w) => {
+    const page = db.prepare('SELECT id, name FROM pages WHERE id=?').get(w.page_id);
+    return { ...w, page_name: page ? page.name : '(page missing)', files: listMediaFiles(w.folder_path).length };
+  });
+  res.json({ watchers: list });
+});
+app.post('/api/instant', (req, res) => {
+  const { name = '', folder_path = '', page_id = '', post_as = 'reel', caption_template = '{filename}', per_scan = 5 } = req.body || {};
+  if (!folder_path || !fs.existsSync(folder_path) || !fs.statSync(folder_path).isDirectory())
+    return res.status(400).json({ error: 'Folder mojood nahi — sahi local path dein (e.g. C:\\Videos\\Instant)' });
+  const page = db.prepare('SELECT * FROM pages WHERE id=?').get(page_id);
+  if (!page) return res.status(404).json({ error: 'Page not found' });
+  const st = db.prepare(`INSERT INTO instant_watchers (name,folder_path,page_id,post_as,caption_template,per_scan,status)
+    VALUES (?,?,?,?,?,?,'active')`).run(
+    name || path.basename(folder_path), folder_path, page_id,
+    post_as === 'feed' ? 'feed' : 'reel', caption_template || '{filename}', Math.max(1, Math.min(20, +per_scan || 5))
+  );
+  const w = db.prepare('SELECT * FROM instant_watchers WHERE id=?').get(st.lastInsertRowid);
+  log('instant_created', `#${w.id} ${w.name} → ${page.name} (instant, ${listMediaFiles(folder_path).length} files pending)`);
+  res.json({ watcher: { ...w, files: listMediaFiles(folder_path).length } });
+});
+app.put('/api/instant/:id', (req, res) => {
+  const w = db.prepare('SELECT * FROM instant_watchers WHERE id=?').get(req.params.id);
+  if (!w) return res.status(404).json({ error: 'Watcher not found' });
+  const { name, page_id, post_as, caption_template, per_scan, status } = req.body || {};
+  if (page_id && !db.prepare('SELECT id FROM pages WHERE id=?').get(page_id)) return res.status(404).json({ error: 'Page not found' });
+  db.prepare('UPDATE instant_watchers SET name=?, page_id=?, post_as=?, caption_template=?, per_scan=?, status=? WHERE id=?').run(
+    name ?? w.name, page_id ?? w.page_id,
+    post_as ? (post_as === 'feed' ? 'feed' : 'reel') : w.post_as,
+    caption_template ?? w.caption_template, per_scan ? Math.max(1, Math.min(20, +per_scan)) : w.per_scan,
+    status === 'paused' ? 'paused' : 'active', w.id
+  );
+  log('instant_updated', `#${w.id} updated`);
+  res.json({ watcher: db.prepare('SELECT * FROM instant_watchers WHERE id=?').get(w.id) });
+});
+app.delete('/api/instant/:id', (req, res) => {
+  db.prepare('DELETE FROM instant_watchers WHERE id=?').run(req.params.id);
+  log('instant_deleted', `#${req.params.id} deleted (files untouched)`);
+  res.json({ ok: true });
+});
+app.post('/api/instant/:id/scan', async (req, res) => {
+  const w = db.prepare('SELECT * FROM instant_watchers WHERE id=?').get(req.params.id);
+  if (!w) return res.status(404).json({ error: 'Watcher not found' });
+  const r = await processInstant(w);
+  if (!r.ok) return res.status(502).json(r);
+  res.json(r);
+});
+
 // ---------- Cron: local scheduled queue → FB publish (Asia/Karachi, har minute) ----------
 // SIRF local queue (fb_post_id khali) — FB-scheduled posts FB khud publish karta hai.
 cron.schedule('* * * * *', async () => {
@@ -734,6 +851,16 @@ cron.schedule('* * * * *', async () => {
     }
   } catch (e) { log('watcher_cron_error', String(e.message || e).slice(0, 150)); }
 }, { timezone: TZ });
+
+// ---------- Cron: INSTANT folder scan (har 30 second — file ate hi upload) ----------
+cron.schedule('*/30 * * * * *', async () => {
+  try {
+    const active = db.prepare("SELECT * FROM instant_watchers WHERE status='active'").all();
+    for (const w of active) {
+      try { await processInstant(w); } catch (e) { log('instant_cron_error', `#${w.id}: ${String(e.message || e).slice(0, 120)}`); }
+    }
+  } catch {}
+});
 
 // multer/file errors → JSON
 // eslint-disable-next-line no-unused-vars

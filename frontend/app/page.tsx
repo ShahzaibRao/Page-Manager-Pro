@@ -19,6 +19,7 @@ const Ic = {
   chart: (c: string) => <I cls={c} d="M3 3v18h18M7 15l4-6 4 3 5-8" />,
   cash: (c: string) => <I cls={c} d="M2 7h20v10H2zM16 12h.01M2 10h20" />,
   flame: (c: string) => <I cls={c} d="M12 22c4 0 7-2.7 7-6.5 0-4-3-6-3-9-3 1-4 3-4 3S9 7 9 4C5 7 5 12 5 15.5 5 19.3 8 22 12 22z" />,
+  zap: (c: string) => <I cls={c} d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />,
   folder: (c: string) => <I cls={c} d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />,
   gear: (c: string) => <I cls={c} d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z" />,
   users: (c: string) => <I cls={c} d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8" />,
@@ -39,6 +40,7 @@ const NAV = [
   { id: "create", k: "nav_create", icon: Ic.plus },
   { id: "scheduled", k: "nav_scheduled", icon: Ic.clock },
   { id: "folders", k: "nav_folders", icon: Ic.folder },
+  { id: "creator", k: "nav_creator", icon: Ic.zap },
   { id: "insights", k: "nav_insights", icon: Ic.chart },
   { id: "monetization", k: "nav_monetization", icon: Ic.cash },
   { id: "viral", k: "nav_viral", icon: Ic.flame },
@@ -46,7 +48,7 @@ const NAV = [
 ];
 const TITLE_KEYS: Record<string, string> = {
   dashboard: "t_dashboard", pages: "t_pages", create: "t_create",
-  scheduled: "t_scheduled", folders: "t_folders", insights: "t_insights",
+  scheduled: "t_scheduled", folders: "t_folders", creator: "t_creator", insights: "t_insights",
   monetization: "t_monetization", viral: "t_viral", settings: "t_settings",
 };
 const fmt = (n: number) => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "K" : `${n || 0}`;
@@ -100,6 +102,12 @@ export default function Dashboard() {
   const [progress, setProgress] = useState(0);
   // auto-folder watchers
   const [watchers, setWatchers] = useState<any[]>([]);
+  // instant watchers
+  const [iwatches, setIwatches] = useState<any[]>([]);
+  const [iwfFolder, setIwfFolder] = useState("");
+  const [iwfPage, setIwfPage] = useState("");
+  const [iwfMode, setIwfMode] = useState("reel");
+  const [iwfPerScan, setIwfPerScan] = useState(5);
   const [wfFolder, setWfFolder] = useState("");
   const [wfPage, setWfPage] = useState("");
   const [wfTime, setWfTime] = useState("20:00");
@@ -291,6 +299,35 @@ export default function Dashboard() {
   const runWatcherNow = async (id: number) => {
     say("Uploading next file...");
     try { const r = await api.runWatcher(id); await loadWatchers(); say(r.uploaded ? `${r.uploaded} file upload ✓ (deleted from folder)` : "Folder khali hai"); }
+    catch (e: any) { say(e.message); }
+  };
+
+  // ---- instant watchers ----
+  const loadInstant = async () => {
+    try { const w = await api.instant(); setIwatches(w.watchers || []); } catch {}
+  };
+  useEffect(() => { if (tab === "creator" && backendUp) loadInstant(); }, [tab, backendUp]);
+  const createInstant = async () => {
+    if (!iwfFolder.trim()) return say("Folder path dein (e.g. C:\\Videos\\Instant)");
+    if (!iwfPage) return say("Page select karein");
+    try {
+      await api.createInstant({ folder_path: iwfFolder.trim(), page_id: iwfPage, post_as: iwfMode, per_scan: iwfPerScan });
+      setIwfFolder("");
+      await loadInstant();
+      say("Instant folder setup ✓ — nayi file ate hi upload hogi");
+    } catch (e: any) { say(e.message); }
+  };
+  const toggleInstant = async (w: any) => {
+    try { await api.updateInstant(w.id, { status: w.status === "active" ? "paused" : "active" }); await loadInstant(); }
+    catch (e: any) { say(e.message); }
+  };
+  const delInstant = async (id: number) => {
+    try { await api.deleteInstant(id); await loadInstant(); say("Instant watcher delete ✓ (files untouched)"); }
+    catch (e: any) { say(e.message); }
+  };
+  const scanInstantNow = async (id: number) => {
+    say("Scanning folder...");
+    try { const r = await api.scanInstant(id); await loadInstant(); say(r.uploaded ? `${r.uploaded} file upload ✓ (deleted)` : "Koi stable file nahi (copy ho rahi hogi ya khali)"); }
     catch (e: any) { say(e.message); }
   };
 
@@ -861,15 +898,68 @@ export default function Dashboard() {
                       </div>
                     </div>
                   ))}
+
+                                  </div>
+              )}
+
+              {/* ===== CREATOR WATCH ===== */}
+              {tab === "creator" && (
+                <div className="space-y-4 max-w-[900px]">
+{/* ---- INSTANT ---- */}
+                  <div className="rounded-[18px] t-card border t-line p-6">
+                    <h3 className="font-semibold">⚡ {t(lang, "inst_new")}</h3>
+                    <p className="text-[12px] t-m2 mt-1">{t(lang, "inst_desc")}</p>
+                    <div className="mt-4 grid sm:grid-cols-2 gap-3">
+                      <input value={iwfFolder} onChange={(e) => setIwfFolder(e.target.value)} placeholder={t(lang, "f_folder_ph")}
+                        className="h-11 rounded-[12px] t-bg border t-line px-4 text-[13px] focus:outline-none sm:col-span-2" />
+                      <select value={iwfPage} onChange={(e) => setIwfPage(e.target.value)}
+                        className="h-11 rounded-[12px] t-bg border t-line px-3 text-[13px] focus:outline-none">
+                        <option value="">{t(lang, "f_page_sel")}</option>
+                        {accessPages.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[12px] t-m2">{t(lang, "f_video_as")}</span>
+                        {[[t(lang, "reel"), "reel"], [t(lang, "video_post"), "feed"]].map(([l, v]) => (
+                          <button key={v} onClick={() => setIwfMode(v)} className={`h-8 px-4 rounded-full text-[12px] font-medium ${iwfMode === v ? "bg-[#1877F2]" : "t-panel border t-line3 t-m1"}`}>{l}</button>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[12px] t-m2">{t(lang, "f_per_scan")}</span>
+                        <input type="number" min={1} max={20} value={iwfPerScan} onChange={(e) => setIwfPerScan(+e.target.value)}
+                          className="h-8 w-16 rounded-[10px] t-bg border t-line px-2 text-[13px] focus:outline-none" />
+                      </div>
+                    </div>
+                    <button onClick={createInstant} className="mt-4 h-10 px-6 rounded-full bg-[#1877F2] text-[13px] font-medium shadow-[0_0_20px_rgba(24,119,242,0.4)]">{t(lang, "inst_setup")}</button>
+                  </div>
+                  {iwatches.length === 0 && (
+                    <div className="text-[13px] t-m2">{t(lang, "inst_empty")}</div>
+                  )}
+                  {iwatches.map((w) => (
+                    <div key={w.id} className="rounded-[18px] t-card border t-line p-5 flex flex-wrap gap-4 items-center">
+                      <div className={`w-11 h-11 rounded-[12px] flex items-center justify-center ${w.status === "active" ? "bg-[#132E1F] border border-[#1E4A2E]" : "t-panel border t-line3"}`}>
+                        <span className="text-[18px]">⚡</span>
+                      </div>
+                      <div className="flex-1 min-w-[200px]">
+                        <div className="font-medium text-[14px]">{w.name} <span className={`ml-1 text-[10px] px-2 py-0.5 rounded-full ${w.status === "active" ? "bg-[#132E1F] text-[#3DD598]" : "t-panel t-m2"}`}>{w.status}</span></div>
+                        <div className="text-[12px] t-m2 mt-0.5 truncate">{w.folder_path}</div>
+                        <div className="text-[12px] t-m2">→ {w.page_name} • {w.post_as === "reel" ? t(lang, "reel") : t(lang, "video_post")} • {w.per_scan}/{t(lang, "f_daily")} • {w.files} {t(lang, "f_files")}</div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button onClick={() => scanInstantNow(w.id)} className="h-8 px-3 rounded-full t-panel border t-line3 text-[12px]">{t(lang, "inst_scan_now")}</button>
+                        <button onClick={() => toggleInstant(w)} className="h-8 px-3 rounded-full t-panel border t-line3 text-[12px]">{w.status === "active" ? t(lang, "f_pause") : t(lang, "f_resume")}</button>
+                        <button onClick={() => delInstant(w.id)} className="h-8 w-8 rounded-full t-panel border t-line3 t-m2 hover:text-red-400">{Ic.trash("w-3.5 h-3.5 mx-auto")}</button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
 
               {/* ===== INSIGHTS ===== */}
               {tab === "insights" && (isGlobal ? (
-                !overview ? <div className="t-m2 text-[14px]">Loading overall...</div> : (
+                !overview ? <div className="t-m2 text-[14px]">{t(lang, "loading_overall")}...</div> : (
                 <div className="rounded-[18px] t-card border t-line p-6">
                   <div className="flex items-center justify-between mb-6">
-                    <h3 className="font-semibold">All Pages • Last {range} days (Live: Page Views vs Post Engagements)</h3>
+                    <h3 className="font-semibold">{t(lang, "global_title")} • {t(lang, "last_days")} {range}d</h3>
                     <div className="flex gap-2">{[7, 28, 90].map((r) => (
                       <button key={r} onClick={() => setRange(r)} className={`h-7 px-3 rounded-full text-[12px] ${range === r ? "bg-[#1877F2]" : "t-panel border t-line3 t-m1"}`}>{r}d</button>
                     ))}</div>

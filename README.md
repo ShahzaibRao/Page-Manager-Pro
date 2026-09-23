@@ -114,6 +114,7 @@ CMS/
 
 ## 📌 Versions
 
+- `v0.2` — Creator Watch (instant folder → auto-upload on arrival + stability check + per-scan limit), sync auto-retry with warning notes.
 - `v0.1` — Local full release: connect+sync (paginated full-BM scan), post/schedule incl. files+reels+progress, auto-folder daily uploader, global overview+viral, 5 languages, 3 themes.
 
 ## ⚠️ Notes

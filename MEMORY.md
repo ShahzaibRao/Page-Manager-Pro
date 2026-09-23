@@ -3,12 +3,15 @@
 > Har session me ye file parho, kaam ke baad update karo. Secrets kabhi yahan nahi likhne.
 
 ## State (23 Sep 2026)
+- GitHub: https://github.com/ShahzaibRao/Page-Manager-Pro.git — main pushed + tag **v0.1**. Secrets gitignored (.env, *.db, uploads/*, node_modules); verified zero tokens staged.
 - Stack: backend Express :4000 (node:sqlite `data.db`, node-cron Asia/Karachi) + frontend Next.js 14 :3000.
 - Mode: LIVE. System User token `.env` me (same user id `122105...`, naam "admin"). Token valid.
 - Sync: Business "Followers Page BM" (id `.env` me `FB_BUSINESS_ID`) → **~2797 pages**, **~19 posting access** (page_token wale).
 - Frontend default filter: Posting Access. Header switcher: access pages + **🌐 All Pages (Global)** option.
 - Global: `/api/overview` (totals + merged series + per-page) aur `/api/viral-global` (top N by engagement, 19 pages scan). Dashboard/Insights/Viral tabs me global branches.
 - i18n: `frontend/lib/i18n.ts` (en/ur/es/zh/ar, ar=RTL), default ur, localStorage `pmp_lang`. Themes dark/black/light via CSS vars + t-* utilities (`globals.css`), localStorage `pmp_theme`, selector Settings > Appearance me. Toasts + FB-provided texts untranslated rehte hain.
+- Instant folders: `instant_watchers` table + `/api/instant` CRUD + scan-now. 30s cron. Stability check (size stable across scans) taake copy-hoti file aadhi upload na ho. per_scan 1–20. Upload confirm + DB record ke BAAD hi delete.
+- Sidebar me **Creator Watch** tab (instant folder UI yahan moved; Auto Folder tab me sirf daily wale).
 
 ## Permissions (token, verified via /me/permissions)
 20 granted — pages_manage_posts, pages_show_list, read_insights, business_management,

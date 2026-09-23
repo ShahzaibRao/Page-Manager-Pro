@@ -55,6 +55,18 @@ CREATE TABLE IF NOT EXISTS watchers (
   last_run TEXT DEFAULT '',
   created_at TEXT DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS instant_watchers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT DEFAULT '',
+  folder_path TEXT NOT NULL,
+  page_id TEXT NOT NULL,
+  post_as TEXT DEFAULT 'reel',
+  caption_template TEXT DEFAULT '{filename}',
+  per_scan INTEGER DEFAULT 5,
+  status TEXT DEFAULT 'active',
+  last_scan TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now'))
+);
 `);
 
 // fresh columns for old DBs (safe: ignores if already exists)
