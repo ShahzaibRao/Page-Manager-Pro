@@ -6,6 +6,12 @@ A secure, personal **Facebook Business Manager dashboard** — manage all your B
 
 ![Stack](https://img.shields.io/badge/Next.js-14-black) ![Backend](https://img.shields.io/badge/Express-Node-green) ![DB](https://img.shields.io/badge/SQLite-local-blue) ![API](https://img.shields.io/badge/Graph_API-v26.0-1877F2)
 
+## 🖥 Live Demo (sample data)
+
+👉 **https://shahzaibrao.github.io/Page-Manager-Pro/**
+
+Interactive static preview of the dashboard (all 9 sections, dark theme). For real data, run locally with your System User Token.
+
 ---
 
 ## ✨ Features (PRD Modules A–H)
