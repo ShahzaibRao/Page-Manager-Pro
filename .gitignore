@@ -1,0 +1,21 @@
+# secrets — KABHI push nahi karne
+backend/.env
+frontend/.env.local
+*.db
+*.db-journal
+
+# user uploads (local files, bari + private ho sakti hain)
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# deps + build
+node_modules/
+frontend/.next/
+frontend/out/
+backend/node_modules/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
+.vscode/

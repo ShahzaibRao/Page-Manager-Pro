@@ -1,0 +1,59 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------- themes ---------- */
+:root, [data-theme="dark"] {
+  --bg: #0F0F0F; --card: #1A1A1A; --card2: #1E1E1E; --inner: #121212; --panel: #1F1F1F;
+  --line: #252525; --line2: #1E1E1E; --line3: #2A2A2A;
+  --text: #ffffff; --m1: rgba(255,255,255,.68); --m2: rgba(255,255,255,.45); --m3: rgba(255,255,255,.30);
+  --hover: rgba(255,255,255,.045); --selrow: rgba(255,255,255,.06);
+}
+[data-theme="black"] {
+  --bg: #000000; --card: #0B0B0B; --card2: #101010; --inner: #000000; --panel: #141414;
+  --line: #232323; --line2: #161616; --line3: #2b2b2b;
+  --text: #ffffff; --m1: rgba(255,255,255,.68); --m2: rgba(255,255,255,.45); --m3: rgba(255,255,255,.30);
+  --hover: rgba(255,255,255,.05); --selrow: rgba(255,255,255,.07);
+}
+[data-theme="light"] {
+  --bg: #F1F3F6; --card: #ffffff; --card2: #ffffff; --inner: #F4F6F9; --panel: #ECEFF3;
+  --line: #E2E6EB; --line2: #E2E6EB; --line3: #CFD5DC;
+  --text: #14171A; --m1: rgba(20,23,26,.72); --m2: rgba(20,23,26,.55); --m3: rgba(20,23,26,.42);
+  --hover: rgba(0,0,0,.045); --selrow: rgba(24,119,242,.08);
+}
+
+body { font-family: Inter, system-ui, sans-serif; background: var(--bg); color: var(--text); }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: var(--line3); border-radius: 999px; }
+input[type="datetime-local"]::-webkit-calendar-picker-indicator, input[type="time"]::-webkit-calendar-picker-indicator { filter: invert(.6); cursor: pointer; }
+[data-theme="light"] input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+[data-theme="light"] input[type="time"]::-webkit-calendar-picker-indicator { filter: none; }
+input, textarea, select { color: var(--text); }
+input::placeholder, textarea::placeholder { color: var(--m3); }
+
+/* themed surface/text utilities (replace hardcoded dark hexes) */
+.t-bg { background-color: var(--bg); }
+.t-card { background-color: var(--card); }
+.t-card2 { background-color: var(--card2); }
+.t-inner { background-color: var(--inner); }
+.t-panel { background-color: var(--panel); }
+.t-line { border-color: var(--line); }
+.t-line2 { border-color: var(--line2); }
+.t-line3 { border-color: var(--line3); }
+.t-divide > * + * { border-color: var(--line); }
+.t-text { color: var(--text); }
+.t-m1 { color: var(--m1); }
+.t-m2 { color: var(--m2); }
+.t-m3 { color: var(--m3); }
+.t-hover:hover { background-color: var(--hover); }
+.t-texth:hover { color: var(--text); }
+.t-line3h:hover { border-color: var(--line3); }
+.t-spark { background-color: var(--line3); }
+.t-selrow { background-color: var(--selrow); }
+.t-invbtn { background-color: var(--text); color: var(--bg); }
+.t-invbtn:hover { opacity: .9; }
+.t-chip { background-color: var(--hover); border-color: var(--line); }
+/* solid blue keeps white text in every theme */
+[data-theme="light"] .bg-\[\#1877F2\],
+[data-theme="light"] .from-\[\#1877F2\] { color: #fff; }
