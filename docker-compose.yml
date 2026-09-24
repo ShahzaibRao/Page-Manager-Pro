@@ -55,6 +55,10 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
     restart: unless-stopped
+    environment:
+      # Docker sets HOSTNAME=<container-id>; Next standalone usi pe bind ho jata hai.
+      # 0.0.0.0 lazmi taake port mapping + healthcheck kaam kare.
+      HOSTNAME: 0.0.0.0
     ports:
       - "3000:3000"
     depends_on:
