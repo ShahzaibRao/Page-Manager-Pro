@@ -3,7 +3,8 @@
 > Har session me ye file parho, kaam ke baad update karo. Secrets kabhi yahan nahi likhne.
 
 ## State (23 Sep 2026)
-- GitHub: https://github.com/ShahzaibRao/Page-Manager-Pro.git — main pushed + tag **v0.1**. Secrets gitignored (.env, *.db, uploads/*, node_modules); verified zero tokens staged.
+- GitHub: https://github.com/ShahzaibRao/Page-Manager-Pro.git — main pushed + tags **v0.1, v0.2**. Secrets gitignored (.env, *.db, uploads/*, node_modules); verified zero tokens staged.
+- Demo live: https://shahzaibrao.github.io/Page-Manager-Pro/ (`docs/index.html` = current dashboard replica, deploys via `.github/workflows/pages.yml`). About description + homepage set via API.
 - Stack: backend Express :4000 (node:sqlite `data.db`, node-cron Asia/Karachi) + frontend Next.js 14 :3000.
 - Mode: LIVE. System User token `.env` me (same user id `122105...`, naam "admin"). Token valid.
 - Sync: Business "Followers Page BM" (id `.env` me `FB_BUSINESS_ID`) → **~2797 pages**, **~19 posting access** (page_token wale).
