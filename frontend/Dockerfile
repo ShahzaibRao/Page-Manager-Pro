@@ -9,7 +9,11 @@ FROM node:24-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-ARG NEXT_PUBLIC_API_URL=http://localhost:4000
+# next.config.js build-time evaluate hota hai — is liye proxy target YAHAN set karo.
+# Ye hamesha docker DNS naam hai (koi IP nahi), har environment me same.
+ARG BACKEND_INTERNAL_URL=http://backend:4000
+ENV BACKEND_INTERNAL_URL=$BACKEND_INTERNAL_URL
+ARG NEXT_PUBLIC_API_URL=""
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
