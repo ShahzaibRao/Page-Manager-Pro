@@ -83,7 +83,12 @@ export default function Dashboard() {
   const [backendUp, setBackendUp] = useState(false);
   const [connected, setConnected] = useState(false);
   const [pages, setPages] = useState<any[]>([]);
-  const [selId, setSelId] = useState("");
+  const [selId, setSelId] = useState(() => {
+    try { return localStorage.getItem("pmp_page") || ""; } catch { return ""; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("pmp_page", selId || ""); } catch {}
+  }, [selId]);
   const [insights, setInsights] = useState<any>(null);
   const [range, setRange] = useState(28);
   const [health, setHealth] = useState<any>(null);
