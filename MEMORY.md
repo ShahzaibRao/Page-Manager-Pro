@@ -38,6 +38,8 @@ pages_read_engagement, pages_read_user_content, publish_video, + misc. Sab chahi
 - v20.0 deprecated (auto-upgrade hota hai); default v26.0 set hai.
 
 ## Incidents
+- Same-origin /api proxy: `next.config.js` BUILD-time evaluate hota hai — runtime env kaam nahi karta. Proxy target Dockerfile me `ARG/ENV BACKEND_INTERNAL_URL=http://backend:4000` se bake karo (docker DNS, koi IP nahi). Verified live via `:3000/api/*`.
+- Server checks sirf SSH-localhost se (owner ne public probing mana kiya — SL sirf unke laptop IP pe khuli hai).
 - 9 rapid "hi" test posts → spam block 368 (temporary). Lesson: bulk tests nahi; test ho to foran delete.
 - Watcher file-delete bug → fix: DB record PEHLE, unlink AKHIR me (Constitution rule).
 - page-token axios dump log file me gaya tha → deleted; full dumps banned.
