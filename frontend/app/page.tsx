@@ -132,12 +132,24 @@ export default function Dashboard() {
     : (pages.find((p) => p.id === selId) || pages.find((p) => p.can_post) || pages[0]);
   const isGlobal = selId === "GLOBAL";
   const accessPages = useMemo(() => pages.filter((p) => p.can_post), [pages]);
+  const [pageSort, setPageSort] = useState("followers_desc");
   const filteredPages = useMemo(() => {
     const base = pageFilter === "access" ? accessPages : pages;
     const q = pageSearch.trim().toLowerCase();
-    const out = q ? base.filter((p) => (p.name || "").toLowerCase().includes(q)) : base;
+    let out = q ? base.filter((p) => (p.name || "").toLowerCase().includes(q)) : [...base];
+    if (pageSort === "followers_desc") out.sort((a, b) => (b.followers_count || 0) - (a.followers_count || 0));
+    else if (pageSort === "followers_asc") out.sort((a, b) => (a.followers_count || 0) - (b.followers_count || 0));
+    else out.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
     return out;
-  }, [pageFilter, accessPages, pages, pageSearch]);
+  }, [pageFilter, accessPages, pages, pageSearch, pageSort]);
+  // pages pagination (200 per page)
+  const PAGE_SIZE = 200;
+  const [pageNum, setPageNum] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(filteredPages.length / PAGE_SIZE));
+  const safePageNum = Math.min(pageNum, totalPages);
+  const pagedPages = filteredPages.slice((safePageNum - 1) * PAGE_SIZE, safePageNum * PAGE_SIZE);
+  const goPage = (n: number) => setPageNum(Math.max(1, Math.min(totalPages, n)));
+  useEffect(() => { setPageNum(1); }, [pageFilter, pageSearch, pages.length, pageSort]);
   const say = (t: string) => { setToast(t); setTimeout(() => setToast(""), 4000); };
 
   const refreshPages = async () => {
@@ -691,7 +703,13 @@ export default function Dashboard() {
                     </button>
                     <input value={pageSearch} onChange={(e) => setPageSearch(e.target.value)} placeholder={t(lang, "search_pages")}
                       className="h-8 px-3 rounded-full t-card border t-line text-[13px] focus:outline-none w-[200px]" />
-                    <span className="text-[12px] t-m3 ml-auto">{t(lang, "showing")} {Math.min(filteredPages.length, 200)} {t(lang, "of")} {filteredPages.length}</span>
+                    <select value={pageSort} onChange={(e) => setPageSort(e.target.value)}
+                      className="h-8 px-2 rounded-full t-card border t-line text-[12px] focus:outline-none" title={t(lang, "sort_l")}>
+                      <option value="followers_desc">{t(lang, "sort_top")}</option>
+                      <option value="followers_asc">{t(lang, "sort_low")}</option>
+                      <option value="name">{t(lang, "sort_az")}</option>
+                    </select>
+                    <span className="text-[12px] t-m3 ml-auto">{t(lang, "showing")} {(safePageNum - 1) * PAGE_SIZE + 1}–{Math.min(safePageNum * PAGE_SIZE, filteredPages.length)} {t(lang, "of")} {filteredPages.length}</span>
                   </div>
                   {pageFilter === "access" && accessPages.length === 0 && (
                     <div className="p-3 rounded-[12px] bg-[#2A1F15] border border-[#4A3520] text-[13px] text-[#FFB86A]">
@@ -699,7 +717,7 @@ export default function Dashboard() {
                     </div>
                   )}
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-                    {filteredPages.slice(0, 200).map((p) => (
+                    {pagedPages.map((p) => (
                     <div key={p.id} onClick={() => setSelId(p.id)}
                       className={`rounded-[20px] border p-6 relative overflow-hidden cursor-pointer ${p.id === selId ? "t-card2 border-[#1877F2]/50 shadow-[0_0_30px_rgba(24,119,242,0.15)]" : "t-card t-line t-line3h"}`}>
                       <div className="flex items-start justify-between">
@@ -721,6 +739,28 @@ export default function Dashboard() {
                     </div>
                     ))}
                   </div>
+                  {totalPages > 1 && (
+                    <div className="flex items-center justify-center gap-1.5 flex-wrap pt-2">
+                      <button onClick={() => goPage(safePageNum - 1)} disabled={safePageNum <= 1}
+                        className="h-8 px-3 rounded-full t-panel border t-line3 text-[12px] disabled:opacity-40">← Prev</button>
+                      {Array.from({ length: totalPages }, (_, i) => i + 1)
+                        .filter((n) => n === 1 || n === totalPages || Math.abs(n - safePageNum) <= 2)
+                        .reduce<(number | "…")[]>((acc, n) => {
+                          const prev = acc[acc.length - 1];
+                          if (typeof prev === "number" && (n as number) - prev > 1) acc.push("…");
+                          acc.push(n);
+                          return acc;
+                        }, [])
+                        .map((n, i) => n === "…" ? (
+                          <span key={"e" + i} className="text-[12px] t-m3 px-1">…</span>
+                        ) : (
+                          <button key={n} onClick={() => goPage(n)}
+                            className={`h-8 min-w-[32px] px-2 rounded-full text-[12px] font-medium ${n === safePageNum ? "bg-[#1877F2]" : "t-panel border t-line3 t-m1"}`}>{n}</button>
+                        ))}
+                      <button onClick={() => goPage(safePageNum + 1)} disabled={safePageNum >= totalPages}
+                        className="h-8 px-3 rounded-full t-panel border t-line3 text-[12px] disabled:opacity-40">Next →</button>
+                    </div>
+                  )}
                 </div>
               )}
 
