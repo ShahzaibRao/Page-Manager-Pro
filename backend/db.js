@@ -72,6 +72,20 @@ CREATE TABLE IF NOT EXISTS instant_watchers (
   last_scan TEXT DEFAULT '',
   created_at TEXT DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT UNIQUE NOT NULL,
+  name TEXT DEFAULT '',
+  password_hash TEXT DEFAULT '',
+  provider TEXT DEFAULT 'email',
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS user_tokens (
+  user_id INTEGER PRIMARY KEY,
+  token_enc TEXT NOT NULL,
+  business_id TEXT DEFAULT '',
+  updated_at TEXT DEFAULT (datetime('now'))
+);
 `);
 
 // fresh columns for old DBs (safe: ignores if already exists)
@@ -84,6 +98,12 @@ for (const [table, col] of [
   ['pages', 'can_post INTEGER DEFAULT 0'],
   ['posts', 'file_paths TEXT DEFAULT "[]"'],
   ['posts', 'post_as TEXT DEFAULT "feed"'],
+  ['businesses', 'user_id INTEGER'],
+  ['pages', 'user_id INTEGER'],
+  ['posts', 'user_id INTEGER'],
+  ['logs', 'user_id INTEGER'],
+  ['watchers', 'user_id INTEGER'],
+  ['instant_watchers', 'user_id INTEGER'],
 ]) {
   try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col}`); } catch {}
 }

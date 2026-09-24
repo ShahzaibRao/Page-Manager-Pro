@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const db = require('./db');
 const fb = require('./fb');
+const auth = require('./auth');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -18,11 +19,16 @@ app.use(cors({
     if (!origin || !ALLOWED.length || ALLOWED.includes(origin)) return cb(null, true);
     cb(new Error('CORS blocked: ' + origin));
   },
+  credentials: true, // cookie-based sessions ke liye lazmi (origin echo hota hai, * nahi)
 }));
 app.use(express.json({ limit: '50mb' }));
+app.use(auth.requireAuth); // /api/health + /api/auth/* open, baqi login lazmi
 
-const log = (action, detail = '') => {
-  try { db.prepare('INSERT INTO logs (action, detail) VALUES (?,?)').run(action, detail); } catch {}
+const log = (action, detail = '', uid = null) => {
+  try {
+    if (uid) db.prepare('INSERT INTO logs (action, detail, user_id) VALUES (?,?,?)').run(action, detail, uid);
+    else db.prepare('INSERT INTO logs (action, detail) VALUES (?,?)').run(action, detail);
+  } catch {}
 };
 // tiny TTL cache — repeated tab switches / reloads FB ko dobara hit nahi karte
 const __cache = new Map();
@@ -35,53 +41,123 @@ async function cached(key, ttlMs, fn) {
   return v;
 }
 const clearCache = () => __cache.clear();
-const row = (pageId) => db.prepare('SELECT * FROM pages WHERE id=? OR fb_page_id=?').get(pageId, pageId);
+const row = (pageId, uid) => uid === undefined
+  ? db.prepare('SELECT * FROM pages WHERE id=? OR fb_page_id=?').get(pageId, pageId)
+  : db.prepare('SELECT * FROM pages WHERE (id=? OR fb_page_id=?) AND user_id=?').get(pageId, pageId, uid);
+// current user ka FB token (vault) — legacy: koi user nahi to .env
+const utoken = (req) => (req.user ? auth.getUserToken(req.user.id) : (process.env.FB_SYSTEM_USER_TOKEN || ''));
+const needToken = (req, res) => {
+  const t = utoken(req);
+  if (!t) { notConn(res); return null; }
+  return t;
+};
 const notConn = (res) => res.status(409).json({ not_connected: true, error: 'System User Token connect nahi hai. Settings > Connect Business Manager me token lagayein.' });
 
-// token ko backend/.env me save karna (sirf server-side)
-function saveTokenToEnv(token, businessId) {
-  const envPath = path.join(__dirname, '.env');
-  let txt = '';
-  try { txt = fs.readFileSync(envPath, 'utf8'); } catch {}
-  const set = (k, v) => {
-    const line = `${k}=${v}`;
-    if (new RegExp(`^${k}=.*$`, 'm').test(txt)) txt = txt.replace(new RegExp(`^${k}=.*$`, 'm'), line);
-    else txt += (txt.endsWith('\n') || !txt ? '' : '\n') + line + '\n';
-  };
-  set('FB_SYSTEM_USER_TOKEN', token);
-  if (businessId) set('FB_BUSINESS_ID', businessId);
-  fs.writeFileSync(envPath, txt);
-  process.env.FB_SYSTEM_USER_TOKEN = token;
-  if (businessId) process.env.FB_BUSINESS_ID = businessId;
-}
+// (global .env token write REMOVED — multi-user me token sirf per-user vault me jata hai)
 
 // ---------- Health ----------
 app.get('/api/health', (req, res) => res.json({
   ok: true, time: new Date().toISOString(), tz: process.env.TIMEZONE || 'Asia/Karachi',
-  connected: fb.isConnected(),
+  connected: fb.isConnected() || !!(req.user && utoken(req)),
 }));
 
+// ---------- Auth (email + Google) ----------
+const setSession = (res, userId) => {
+  res.cookie(auth.COOKIE, auth.signSession(userId), {
+    httpOnly: true, sameSite: 'lax', maxAge: 30 * 24 * 3600 * 1000, secure: false, path: '/',
+  });
+};
+app.get('/api/auth/config', (req, res) => res.json({
+  google: !!(process.env.GOOGLE_CLIENT_ID || ''),
+  google_client_id: process.env.GOOGLE_CLIENT_ID || '',
+}));
+app.post('/api/auth/signup', (req, res) => {
+  const { email = '', password = '', name = '' } = req.body || {};
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Sahi email dein' });
+  if (String(password).length < 6) return res.status(400).json({ error: 'Password min 6 characters' });
+  try {
+    const st = db.prepare('INSERT INTO users (email,name,password_hash,provider) VALUES (?,?,?,?)').run(
+      email.toLowerCase().trim(), String(name || '').slice(0, 60) || email.split('@')[0], auth.hashPw(password), 'email');
+    const user = db.prepare('SELECT id, email, name, provider, created_at FROM users WHERE id=?').get(st.lastInsertRowid);
+    auth.adoptLegacy(user.id);
+    setSession(res, user.id);
+    log('signup', `${user.email} joined`, user.id);
+    res.json({ user });
+  } catch (e) {
+    if (String(e.message || '').includes('UNIQUE')) return res.status(409).json({ error: 'Ye email registered hai — login karein' });
+    res.status(500).json({ error: 'Signup failed' });
+  }
+});
+app.post('/api/auth/login', (req, res) => {
+  const { email = '', password = '' } = req.body || {};
+  const user = db.prepare('SELECT * FROM users WHERE email=?').get(String(email).toLowerCase().trim());
+  if (!user || user.provider !== 'email' || !auth.checkPw(password, user.password_hash)) {
+    return res.status(401).json({ error: 'Email ya password ghalat' });
+  }
+  auth.adoptLegacy(user.id);
+  setSession(res, user.id);
+  log('login', `${user.email}`, user.id);
+  res.json({ user: { id: user.id, email: user.email, name: user.name, provider: user.provider, created_at: user.created_at } });
+});
+app.post('/api/auth/google', async (req, res) => {
+  try {
+    const { credential = '' } = req.body || {};
+    if (!credential) return res.status(400).json({ error: 'Google credential missing' });
+    const g = await auth.verifyGoogle(credential);
+    let user = db.prepare('SELECT * FROM users WHERE email=?').get(g.email.toLowerCase());
+    if (!user) {
+      const st = db.prepare('INSERT INTO users (email,name,password_hash,provider) VALUES (?,?,?,?)').run(g.email.toLowerCase(), g.name, '', 'google');
+      user = db.prepare('SELECT * FROM users WHERE id=?').get(st.lastInsertRowid);
+      log('signup', `${user.email} joined (google)`, user.id);
+    }
+    auth.adoptLegacy(user.id);
+    setSession(res, user.id);
+    res.json({ user: { id: user.id, email: user.email, name: user.name, provider: user.provider, created_at: user.created_at } });
+  } catch (e) {
+    res.status(401).json({ error: e.message || 'Google login failed' });
+  }
+});
+app.get('/api/auth/me', (req, res) => {
+  const u = auth.authUser(req);
+  if (!u) return res.status(401).json({ need_login: true });
+  res.json({ user: u });
+});
+app.post('/api/auth/logout', (req, res) => {
+  res.clearCookie(auth.COOKIE, { path: '/' });
+  res.json({ ok: true });
+});
+
 // ---------- Module A: Connect + Sync (REAL) ----------
-async function syncWithRetry(token) {
-  let r = await syncFromFB(token);
+// user ka vault business id
+function getUserBiz(userId) {
+  try {
+    const r = db.prepare('SELECT business_id FROM user_tokens WHERE user_id=?').get(userId);
+    return (r && r.business_id) || '';
+  } catch { return ''; }
+}
+
+async function syncWithRetry(token, userId, userBiz) {
+  let r = await syncFromFB(token, userId, userBiz);
   if (r.pages === 0) {
     // FB edge kabhi transiently khali deta hai — ek retry
     await new Promise((res) => setTimeout(res, 3000));
-    r = await syncFromFB(token);
+    r = await syncFromFB(token, userId, userBiz);
     if (r.pages > 0) r.notes.push('pehli try khali thi, retry pe mil gaye');
   }
   return r;
 }
 
-// POST /api/connect {token, business_id?} — validate, save, sync
+// POST /api/connect {token, business_id?} — validate, VAULT me save, sync
 app.post('/api/connect', async (req, res) => {
   const { token, business_id } = req.body || {};
   if (!token) return res.status(400).json({ error: 'Token required (System User Token)' });
   try {
     const me = await fb.validateToken(token);
-    saveTokenToEnv(token, business_id || '');
-    const result = await syncWithRetry(token);
-    log('connected', `System User: ${me.name} (${me.id}) — ${result.pages} pages synced`);
+    db.prepare('INSERT OR REPLACE INTO user_tokens (user_id, token_enc, business_id) VALUES (?,?,?)')
+      .run(req.user.id, auth.encToken(token), business_id || '');
+    const result = await syncWithRetry(token, req.user.id, business_id || '');
+    clearCache();
+    log('connected', `System User: ${me.name} (${me.id}) — ${result.pages} pages synced`, req.user.id);
     res.json({ ok: true, me, ...result });
   } catch (e) {
     res.status(401).json({ error: 'Token invalid ya FB unreachable', detail: fb.fbErr(e) });
@@ -90,35 +166,31 @@ app.post('/api/connect', async (req, res) => {
 
 // POST /api/sync — dobara FB se businesses+pages kheenchna
 app.post('/api/sync', async (req, res) => {
-  if (!fb.isConnected()) return notConn(res);
+  const t = utoken(req);
+  if (!t) return notConn(res);
   try {
-    const result = await syncWithRetry();
+    const result = await syncWithRetry(t, req.user.id, getUserBiz(req.user.id));
     clearCache(); // fresh sync → purana cached data invalid
-    log('synced', `${result.pages} pages synced`);
+    log('synced', `${result.pages} pages synced`, req.user.id);
     res.json({ ok: true, ...result });
   } catch (e) {
     res.status(502).json({ error: 'Sync failed', detail: fb.fbErr(e) });
   }
 });
 
-// POST /api/disconnect — token hatana + synced data saaf karna
+// POST /api/disconnect — SIRF is user ka token + synced pages saaf (doosre users untouched)
 app.post('/api/disconnect', (req, res) => {
-  try {
-    const envPath = path.join(__dirname, '.env');
-    let txt = '';
-    try { txt = fs.readFileSync(envPath, 'utf8'); } catch {}
-    txt = txt.replace(/^FB_SYSTEM_USER_TOKEN=.*$/m, 'FB_SYSTEM_USER_TOKEN=');
-    fs.writeFileSync(envPath, txt);
-  } catch {}
-  process.env.FB_SYSTEM_USER_TOKEN = '';
-  db.prepare('DELETE FROM pages').run();
-  db.prepare('DELETE FROM businesses').run();
-  log('disconnected', 'Token removed, synced pages cleared');
+  const uid = req.user.id;
+  db.prepare('DELETE FROM user_tokens WHERE user_id=?').run(uid);
+  db.prepare('DELETE FROM pages WHERE user_id=?').run(uid);
+  db.prepare('DELETE FROM businesses WHERE user_id=?').run(uid);
+  clearCache();
+  log('disconnected', 'Token removed, synced pages cleared', uid);
   res.json({ ok: true });
 });
 
-async function syncFromFB(token) {
-  const t = token || fb.getToken();
+async function syncFromFB(token, userId, userBiz) {
+  const t = token || (userId ? auth.getUserToken(userId) : fb.getToken());
   const seen = new Map(); // fb_page_id -> page obj
   let businesses = [];
   const notes = [];
@@ -128,7 +200,7 @@ async function syncFromFB(token) {
     businesses = await fb.getBusinesses(t);
   } catch (e) { notes.push('businesses edge unavailable (business_management permission chahiye ya System User ko business role dein)'); }
   // fallback: .env me fixed business id ho to use hamesha include karo (flaky edge se bachao)
-  const fixedBiz = process.env.FB_BUSINESS_ID || '';
+  const fixedBiz = userBiz || process.env.FB_BUSINESS_ID || '';
   if (fixedBiz && !businesses.find((b) => b.id === fixedBiz)) {
     try {
       const axios = require('axios');
@@ -139,7 +211,8 @@ async function syncFromFB(token) {
     } catch (e) { notes.push('fixed Business ID read fail'); }
   }
   for (const b of businesses) {
-    db.prepare('INSERT OR REPLACE INTO businesses (id,name) VALUES (?,?)').run(b.id, b.name);
+    if (userId) db.prepare('INSERT OR REPLACE INTO businesses (id,name,user_id) VALUES (?,?,?)').run(b.id, b.name, userId);
+    else db.prepare('INSERT OR REPLACE INTO businesses (id,name) VALUES (?,?)').run(b.id, b.name);
     try {
       for (const p of await fb.getBusinessPages(b.id, t)) {
         if (!seen.has(p.id)) seen.set(p.id, { ...p, business_id: b.id });
@@ -163,26 +236,33 @@ async function syncFromFB(token) {
   } catch (e) { notes.push('/me/accounts fail (pages_show_list permission chahiye): ' + JSON.stringify(fb.fbErr(e)).slice(0, 150)); }
 
   if (!businesses.length && seen.size) {
-    db.prepare('INSERT OR REPLACE INTO businesses (id,name) VALUES (?,?)').run('direct', 'Direct Pages (no Business edge)');
+    if (userId) db.prepare("INSERT OR REPLACE INTO businesses (id,name,user_id) VALUES ('direct','Direct Pages (no Business edge)',?)").run(userId);
+    else db.prepare("INSERT OR REPLACE INTO businesses (id,name) VALUES ('direct','Direct Pages (no Business edge)')").run();
   }
 
   let pageCount = 0;
-  const getOld = db.prepare('SELECT page_token, can_post FROM pages WHERE fb_page_id=?');
-  const putPage = db.prepare(`INSERT OR REPLACE INTO pages
-    (id,fb_page_id,name,category,business_id,followers_count,is_published,verification_status,link,picture_url,page_token,can_post)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const getOld = userId
+    ? db.prepare('SELECT page_token, can_post FROM pages WHERE fb_page_id=? AND user_id=?')
+    : db.prepare('SELECT page_token, can_post FROM pages WHERE fb_page_id=?');
+  const putPage = userId
+    ? db.prepare(`INSERT OR REPLACE INTO pages
+      (id,fb_page_id,name,category,business_id,followers_count,is_published,verification_status,link,picture_url,page_token,can_post,user_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    : db.prepare(`INSERT OR REPLACE INTO pages
+      (id,fb_page_id,name,category,business_id,followers_count,is_published,verification_status,link,picture_url,page_token,can_post)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
   for (const p of seen.values()) {
     const pic = (p.picture && p.picture.data && p.picture.data.url) || p.picture_url || '';
     // purana token mehfooz rakho (business edges me token nahi hota)
     let tok = p.page_token || '';
     if (!tok) {
-      const old = getOld.get(p.id);
+      const old = userId ? getOld.get(p.id, userId) : getOld.get(p.id);
       if (old && old.page_token) tok = old.page_token;
     }
     putPage.run(
       'pg_' + p.id, p.id, p.name, p.category || '', p.business_id || 'direct',
       p.followers_count || 0, p.is_published ? 1 : 0, p.verification_status || '',
-      p.link || '', pic, tok, tok ? 1 : 0
+      p.link || '', pic, tok, tok ? 1 : 0, ...(userId ? [userId] : [])
     );
     pageCount++;
   }
@@ -190,17 +270,29 @@ async function syncFromFB(token) {
   // 3) page-token backfill — BATCH (?ids=, 50 per call) taake hazaron pages pe bhi fast ho
   let filled = 0;
   try {
-    const missing = db.prepare("SELECT fb_page_id FROM pages WHERE page_token='' OR page_token IS NULL").all().map((r) => r.fb_page_id);
+    const missing = (userId
+      ? db.prepare("SELECT fb_page_id FROM pages WHERE (page_token='' OR page_token IS NULL) AND user_id=?").all(userId)
+      : db.prepare("SELECT fb_page_id FROM pages WHERE page_token='' OR page_token IS NULL").all()
+    ).map((r) => r.fb_page_id);
     if (missing.length) {
       const got = await fb.getPageTokensBatch(missing, t);
-      const upd = db.prepare('UPDATE pages SET page_token=?, can_post=1 WHERE fb_page_id=?');
-      for (const [id, tok] of Object.entries(got)) { upd.run(tok, id); filled++; }
+      const upd = userId
+        ? db.prepare('UPDATE pages SET page_token=?, can_post=1 WHERE fb_page_id=? AND user_id=?')
+        : db.prepare('UPDATE pages SET page_token=?, can_post=1 WHERE fb_page_id=?');
+      for (const [id, tk] of Object.entries(got)) {
+        if (userId) upd.run(tk, id, userId); else upd.run(tk, id);
+        filled++;
+      }
     }
   } catch {}
   if (filled) notes.push(`${filled} pages ke page-tokens backfill hue`);
 
-  const withAccess = db.prepare('SELECT COUNT(*) c FROM pages WHERE can_post=1').get().c;
-  const total = db.prepare('SELECT COUNT(*) c FROM pages').get().c;
+  const withAccess = (userId
+    ? db.prepare('SELECT COUNT(*) c FROM pages WHERE can_post=1 AND user_id=?').get(userId)
+    : db.prepare('SELECT COUNT(*) c FROM pages WHERE can_post=1').get()).c;
+  const total = (userId
+    ? db.prepare('SELECT COUNT(*) c FROM pages WHERE user_id=?').get(userId)
+    : db.prepare('SELECT COUNT(*) c FROM pages').get()).c;
   if (pageCount === 0 && total > 0) notes.push('FB se is dafa koi page nahi mila — purana synced data mehfooz hai');
   if (pageCount === 0 && total === 0) notes.push('FB se koi page nahi mila — System User ko pages ke assets dein ya dobara Sync karein');
   return { businesses: businesses.length || (seen.size ? 1 : 0), pages: total, with_access: withAccess, notes };
@@ -210,22 +302,24 @@ async function syncFromFB(token) {
 const PUB_COLS = 'id,fb_page_id,name,category,business_id,followers_count,is_published,verification_status,link,picture_url,can_post';
 
 app.get('/api/businesses', (req, res) => {
-  const businesses = db.prepare('SELECT * FROM businesses').all().map(b => ({
+  const uid = req.user.id;
+  const businesses = db.prepare('SELECT * FROM businesses WHERE user_id=?').all(uid).map(b => ({
     ...b,
-    pages: db.prepare(`SELECT ${PUB_COLS} FROM pages WHERE business_id=?`).all(b.id),
-    status: fb.isConnected() ? 'Connected (Live)' : 'Not Connected',
+    pages: db.prepare(`SELECT ${PUB_COLS} FROM pages WHERE business_id=? AND user_id=?`).all(b.id, uid),
+    status: utoken(req) ? 'Connected (Live)' : 'Not Connected',
   }));
-  res.json({ connected: fb.isConnected(), businesses });
+  res.json({ connected: !!utoken(req), businesses });
 });
 app.get('/api/pages', (req, res) => {
-  if (!fb.isConnected() && db.prepare('SELECT COUNT(*) c FROM pages').get().c === 0) return notConn(res);
+  const uid = req.user.id;
+  if (!utoken(req) && db.prepare('SELECT COUNT(*) c FROM pages WHERE user_id=?').get(uid).c === 0) return notConn(res);
   if (req.query.posting === '1') {
-    return res.json({ pages: db.prepare(`SELECT ${PUB_COLS} FROM pages WHERE can_post=1 ORDER BY name`).all() });
+    return res.json({ pages: db.prepare(`SELECT ${PUB_COLS} FROM pages WHERE can_post=1 AND user_id=? ORDER BY name`).all(uid) });
   }
-  res.json({ pages: db.prepare(`SELECT ${PUB_COLS} FROM pages ORDER BY name`).all() });
+  res.json({ pages: db.prepare(`SELECT ${PUB_COLS} FROM pages WHERE user_id=? ORDER BY name`).all(uid) });
 });
 app.get('/api/pages/:id', (req, res) => {
-  const p = db.prepare(`SELECT ${PUB_COLS} FROM pages WHERE id=? OR fb_page_id=?`).get(req.params.id, req.params.id);
+  const p = db.prepare(`SELECT ${PUB_COLS} FROM pages WHERE (id=? OR fb_page_id=?) AND user_id=?`).get(req.params.id, req.params.id, req.user.id);
   if (!p) return res.status(404).json({ error: 'Page not found' });
   res.json({ page: p });
 });
@@ -287,25 +381,26 @@ async function publishFilesNow(page, { message, files, post_as }) {
 app.post('/api/posts', upload.array('files', 10), async (req, res) => {
   const files = req.files || [];
   const paths = files.map((f) => f.path);
-  if (!fb.isConnected()) { cleanupFiles(paths); return notConn(res); }
+  const uid = req.user.id;
+  if (!utoken(req)) { cleanupFiles(paths); return notConn(res); }
   const { page_id, message = '', type = 'text', link_url = '', photo_url = '', scheduled_time = '', post_as = 'feed' } = req.body || {};
-  const page = row(page_id);
+  const page = row(page_id, uid);
   if (!page) { cleanupFiles(paths); return res.status(404).json({ error: 'Page not found' }); }
   if (!String(message || '').trim() && !photo_url && !link_url && !files.length) { cleanupFiles(paths); return res.status(400).json({ error: 'Message, photo, video ya link required' }); }
   const isSched = scheduled_time && new Date(scheduled_time) > new Date();
   const kind = files.length ? (files.some(isVideoFile) ? 'video' : 'photo') : (photo_url ? 'photo' : (link_url ? 'link' : 'text'));
   const filePaths = JSON.stringify(paths);
   const saveRow = (fbId, status, schedISO, err) => db.prepare(
-    `INSERT INTO posts (fb_post_id,page_id,message,type,link_url,status,scheduled_time,error_note,file_paths,post_as,insights_json,created_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    `INSERT INTO posts (fb_post_id,page_id,message,type,link_url,status,scheduled_time,error_note,file_paths,post_as,insights_json,created_at,user_id)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
     fbId || '', page.id, message, kind === 'video' && post_as === 'reel' ? 'reel' : kind, link_url,
-    status, schedISO || '', err || '', filePaths, post_as, '{}', new Date().toISOString()
+    status, schedISO || '', err || '', filePaths, post_as, '{}', new Date().toISOString(), uid
   );
 
   // VIDEO + schedule → local queue (cron time pe file upload karega)
   if (files.length && kind === 'video' && isSched) {
     const st = saveRow('', 'scheduled', new Date(scheduled_time).toISOString(), '');
-    log('post_scheduled', `${page.name}: ${post_as} video file queued`);
+    log('post_scheduled', `${page.name}: ${post_as} video file queued`, uid);
     return res.json({ post: getPost(st.lastInsertRowid), note: 'Video schedule ho gayi — time pe auto-upload hogi' });
   }
 
@@ -329,33 +424,33 @@ app.post('/api/posts', upload.array('files', 10), async (req, res) => {
         }
         cleanupFiles(paths);
         const st = saveRow(r.id || '', 'scheduled', new Date(scheduled_time).toISOString(), '');
-        log('post_scheduled', `${page.name}: photo post scheduled (${message.slice(0, 60)})`);
+        log('post_scheduled', `${page.name}: photo post scheduled (${message.slice(0, 60)})`, uid);
         return res.json({ post: getPost(st.lastInsertRowid), fb: r });
       }
       // files abhi publish
       const out = await publishFilesNow(page, { message, files, post_as });
       cleanupFiles(paths);
       const st = saveRow(out.fb.id || out.fb.post_id || '', 'published', '', '');
-      log('post_published', `${page.name}: ${kind} file post (fb:${out.fb.id || out.fb.post_id})`);
+      log('post_published', `${page.name}: ${kind} file post (fb:${out.fb.id || out.fb.post_id})`, uid);
       return res.json({ post: getPost(st.lastInsertRowid), fb: out.fb, note: out.note });
     }
     if (isSched) {
       // FB pe schedule (FB khud publish karega) + local copy
       const r = await fb.scheduleOnFB(page.fb_page_id, { message, link_url, photo_url, scheduled_time }, page.page_token || undefined);
       const st = saveRow(r.id || '', 'scheduled', new Date(scheduled_time).toISOString(), '');
-      log('post_scheduled', `${page.name}: ${message.slice(0, 80)}`);
+      log('post_scheduled', `${page.name}: ${message.slice(0, 80)}`, uid);
       return res.json({ post: getPost(st.lastInsertRowid), fb: r });
     }
     // abhi publish
     const r = await fb.publishNow(page.fb_page_id, { message, link_url, photo_url }, page.page_token || undefined);
     const st = saveRow(r.id || r.post_id || '', 'published', '', '');
-    log('post_published', `${page.name}: ${message.slice(0, 80)} (fb:${r.id || r.post_id})`);
+    log('post_published', `${page.name}: ${message.slice(0, 80)} (fb:${r.id || r.post_id})`, uid);
     res.json({ post: getPost(st.lastInsertRowid), fb: r });
   } catch (e) {
     // schedule fail ho to local queue me rakho taake cron retry kare (sirf text/link wale)
     if (isSched && !files.length) {
       const st = saveRow('', 'scheduled', new Date(scheduled_time).toISOString(), 'FB schedule fail — cron retry karega');
-      log('schedule_queued_local', `${page.name}: FB error, local queue me`);
+      log('schedule_queued_local', `${page.name}: FB error, local queue me`, uid);
       return res.json({ post: getPost(st.lastInsertRowid), warning: fb.fbErr(e) });
     }
     if (files.length) cleanupFiles(paths);
@@ -365,42 +460,43 @@ app.post('/api/posts', upload.array('files', 10), async (req, res) => {
 });
 
 app.get('/api/posts', (req, res) => {
+  const uid = req.user.id;
   const { page_id, status } = req.query;
-  let q = 'SELECT * FROM posts', w = [], p = [];
-  if (page_id) { w.push('(page_id=? OR page_id=(SELECT id FROM pages WHERE fb_page_id=?))'); p.push(page_id, page_id); }
+  let q = 'SELECT * FROM posts WHERE user_id=?', w = [], p = [uid];
+  if (page_id) { w.push('(page_id=? OR page_id=(SELECT id FROM pages WHERE fb_page_id=? AND user_id=?))'); p.push(page_id, page_id, uid); }
   if (status) { w.push('status=?'); p.push(status); }
-  if (w.length) q += ' WHERE ' + w.join(' AND ');
+  if (w.length) q += ' AND ' + w.join(' AND ');
   q += ' ORDER BY created_at DESC';
   res.json({ posts: db.prepare(q).all(...p) });
 });
 
 // local queue + FB scheduled_posts combined
 app.get('/api/fb/:pageId/scheduled_posts', async (req, res) => {
-  const page = row(req.params.pageId);
+  const page = row(req.params.pageId, req.user.id);
   if (!page) return res.status(404).json({ error: 'Page not found' });
-  const local = db.prepare("SELECT * FROM posts WHERE page_id=? AND status='scheduled' ORDER BY scheduled_time").all(page.id);
+  const local = db.prepare("SELECT * FROM posts WHERE page_id=? AND user_id=? AND status='scheduled' ORDER BY scheduled_time").all(page.id, req.user.id);
   let remote = [];
-  if (fb.isConnected()) remote = await fb.getScheduledPosts(page.fb_page_id, page.page_token || undefined);
+  if (utoken(req)) remote = await fb.getScheduledPosts(page.fb_page_id, page.page_token || undefined);
   res.json({ local, remote });
 });
 
 app.delete('/api/posts/:id', async (req, res) => {
-  const post = db.prepare('SELECT * FROM posts WHERE id=?').get(req.params.id);
+  const post = db.prepare('SELECT * FROM posts WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
   if (!post) return res.status(404).json({ error: 'Post not found' });
-  if (post.fb_post_id && fb.isConnected()) {
+  if (post.fb_post_id && utoken(req)) {
     const pg = db.prepare('SELECT * FROM pages WHERE id=?').get(post.page_id);
     try { await fb.deletePost(post.fb_post_id, (pg && pg.page_token) || undefined); } catch (e) { /* local se phir bhi delete */ }
   }
   db.prepare('DELETE FROM posts WHERE id=?').run(post.id);
-  log('post_deleted', `Post #${post.id} deleted`);
+  log('post_deleted', `Post #${post.id} deleted`, req.user.id);
   res.json({ ok: true });
 });
 
 // ---------- Module C: Health & Monetization (REAL) ----------
 app.get('/api/fb/:pageId/health', async (req, res) => {
-  const page = row(req.params.pageId);
+  const page = row(req.params.pageId, req.user.id);
   if (!page) return res.status(404).json({ error: 'Page not found' });
-  if (!fb.isConnected()) return notConn(res);
+  if (!utoken(req)) return notConn(res);
   try {
     const info = await cached(`health:${page.id}`, 10 * 60 * 1000, () => fb.getPageInfo(page.fb_page_id, page.page_token || undefined));
     db.prepare('UPDATE pages SET followers_count=?, is_published=?, verification_status=? WHERE id=?')
@@ -410,9 +506,9 @@ app.get('/api/fb/:pageId/health', async (req, res) => {
 });
 
 app.get('/api/fb/:pageId/monetization', async (req, res) => {
-  const page = row(req.params.pageId);
+  const page = row(req.params.pageId, req.user.id);
   if (!page) return res.status(404).json({ error: 'Page not found' });
-  if (!fb.isConnected()) return notConn(res);
+  if (!utoken(req)) return notConn(res);
   try {
     const m = await fb.getMonetization(page.fb_page_id, page.followers_count || 0, page.page_token || undefined);
     res.json(m);
@@ -421,9 +517,9 @@ app.get('/api/fb/:pageId/monetization', async (req, res) => {
 
 // ---------- Module D: Insights (REAL) ----------
 app.get('/api/fb/:pageId/insights', async (req, res) => {
-  const page = row(req.params.pageId);
+  const page = row(req.params.pageId, req.user.id);
   if (!page) return res.status(404).json({ error: 'Page not found' });
-  if (!fb.isConnected()) return notConn(res);
+  if (!utoken(req)) return notConn(res);
   const days = [7, 28, 90].includes(+req.query.range) ? +req.query.range : 28;
   try {
     const data = await cached(`insights:${page.id}:${days}`, 5 * 60 * 1000, async () => {
@@ -478,9 +574,9 @@ app.get('/api/fb/:pageId/insights', async (req, res) => {
 
 // ---------- Module E: Viral / Top posts (REAL) ----------
 app.get('/api/fb/:pageId/top-posts', async (req, res) => {
-  const page = row(req.params.pageId);
+  const page = row(req.params.pageId, req.user.id);
   if (!page) return res.status(404).json({ error: 'Page not found' });
-  if (!fb.isConnected()) return notConn(res);
+  if (!utoken(req)) return notConn(res);
   const sort = req.query.sort === 'engagement' ? 'engagement' : 'reach';
   try {
     const out = await cached(`top:${page.id}:${sort}`, 3 * 60 * 1000, async () => {
@@ -517,7 +613,7 @@ app.get('/api/fb/:pageId/top-posts', async (req, res) => {
 
 // ---------- Module H: GLOBAL overview (sab posting-access pages ka total) ----------
 app.get('/api/overview', async (req, res) => {
-  if (!fb.isConnected()) return notConn(res);
+  if (!utoken(req)) return notConn(res);
   const days = [7, 28, 90].includes(+req.query.range) ? +req.query.range : 28;
   const pages = db.prepare('SELECT * FROM pages WHERE can_post=1').all();
   const empty = { mode: 'LIVE', range_days: days, pages: 0,
@@ -575,7 +671,7 @@ app.get('/api/overview', async (req, res) => {
 
 // ---------- Module H2: GLOBAL viral top posts (sab pages se top N by engagement) ----------
 app.get('/api/viral-global', async (req, res) => {
-  if (!fb.isConnected()) return notConn(res);
+  if (!utoken(req)) return notConn(res);
   const limit = Math.min(25, +req.query.limit || 10);
   const pages = db.prepare('SELECT * FROM pages WHERE can_post=1').all();
   const { all, failed } = await cached(`viral:${limit}`, 3 * 60 * 1000, async () => {
@@ -615,9 +711,10 @@ app.get('/api/viral-global', async (req, res) => {
 app.get('/api/history', (req, res) => {
   const days = [7, 28, 90].includes(+req.query.range) ? +req.query.range : 28;
   const { page_id } = req.query;
-  const w = [`datetime(created_at) >= datetime('now','-${days} days')`];
-  const p = [];
-  if (page_id) { w.push('(page_id=? OR page_id=(SELECT id FROM pages WHERE fb_page_id=?))'); p.push(page_id, page_id); }
+  const uid = req.user.id;
+  const w = [`datetime(created_at) >= datetime('now','-${days} days')`, 'user_id=?'];
+  const p = [uid];
+  if (page_id) { w.push('(page_id=? OR page_id=(SELECT id FROM pages WHERE fb_page_id=? AND user_id=?))'); p.push(page_id, page_id, uid); }
   const where = 'WHERE ' + w.join(' AND ');
   const breakdown = db.prepare(
     `SELECT type, COUNT(*) c FROM posts ${where} AND status='published' AND (error_note='' OR error_note IS NULL) GROUP BY type`
@@ -639,11 +736,12 @@ app.get('/api/history', (req, res) => {
 });
 
 // ---------- Module F: Logs + Token health ----------
-app.get('/api/logs', (req, res) => res.json({ logs: db.prepare('SELECT * FROM logs ORDER BY id DESC LIMIT 100').all() }));
+app.get('/api/logs', (req, res) => res.json({ logs: db.prepare('SELECT * FROM logs WHERE user_id=? OR user_id IS NULL ORDER BY id DESC LIMIT 100').all(req.user.id) }));
 app.get('/api/token/health', async (req, res) => {
-  if (!fb.isConnected()) return res.json({ connected: false, error: 'Token connect nahi hai' });
+  const t = utoken(req);
+  if (!t) return res.json({ connected: false, error: 'Token connect nahi hai' });
   try {
-    const me = await fb.validateToken();
+    const me = await fb.validateToken(t);
     res.json({ connected: true, mode: 'LIVE', valid: true, me });
   } catch (e) {
     res.json({ connected: true, valid: false, error: fb.fbErr(e) });
@@ -665,14 +763,14 @@ function listMediaFiles(dir) {
 
 async function processWatcher(w) {
   const page = db.prepare('SELECT * FROM pages WHERE id=?').get(w.page_id);
-  if (!page) { log('watcher_skip', `#${w.id} ${w.name}: page missing`); return { ok: false, error: 'Page not found' }; }
-  if (!page.page_token) { log('watcher_skip', `#${w.id}: ${page.name} ka posting access nahi`); return { ok: false, error: 'Page ka posting access nahi' }; }
+  if (!page) { log('watcher_skip', `#${w.id} ${w.name}: page missing`, w.user_id); return { ok: false, error: 'Page not found' }; }
+  if (!page.page_token) { log('watcher_skip', `#${w.id}: ${page.name} ka posting access nahi`, w.user_id); return { ok: false, error: 'Page ka posting access nahi' }; }
   if (!fs.existsSync(w.folder_path) || !fs.statSync(w.folder_path).isDirectory()) {
-    log('watcher_skip', `#${w.id}: folder nahi mila: ${w.folder_path}`);
+    log('watcher_skip', `#${w.id}: folder nahi mila: ${w.folder_path}`, w.user_id);
     return { ok: false, error: 'Folder nahi mila' };
   }
   const media = listMediaFiles(w.folder_path);
-  if (!media.length) { log('watcher_empty', `#${w.id} ${w.name}: folder khali`); return { ok: true, uploaded: 0 }; }
+  if (!media.length) { log('watcher_empty', `#${w.id} ${w.name}: folder khali`, w.user_id); return { ok: true, uploaded: 0 }; }
   const batch = media.slice(0, Math.max(1, w.per_run || 1));
   let done = 0;
   for (const f of batch) {
@@ -694,10 +792,10 @@ async function processWatcher(w) {
         'published', '[]', mode, '{}', new Date().toISOString()
       );
       fs.unlinkSync(f.path); // delete SIRF confirmed success + record ke baad
-      log('watcher_published', `${page.name}: ${f.name} (fb:${fbId}) — file deleted`);
+      log('watcher_published', `${page.name}: ${f.name} (fb:${fbId}) — file deleted`, w.user_id);
       done++;
     } catch (e) {
-      log('watcher_failed', `${f.name}: ${(e.message || JSON.stringify(fb.fbErr(e))).slice(0, 150)}`);
+      log('watcher_failed', `${f.name}: ${(e.message || JSON.stringify(fb.fbErr(e))).slice(0, 150)}`, w.user_id);
       break;
     }
   }
@@ -705,7 +803,8 @@ async function processWatcher(w) {
 }
 
 app.get('/api/watchers', (req, res) => {
-  const list = db.prepare('SELECT * FROM watchers ORDER BY id DESC').all().map((w) => {
+  const uid0 = req.user.id;
+  const list = db.prepare('SELECT * FROM watchers WHERE user_id=? ORDER BY id DESC').all(uid0).map((w) => {
     const page = db.prepare('SELECT id, name FROM pages WHERE id=?').get(w.page_id);
     const files = listMediaFiles(w.folder_path).length;
     const per = Math.max(1, w.per_run || 1);
@@ -719,42 +818,42 @@ app.post('/api/watchers', (req, res) => {
   const { name = '', folder_path = '', page_id = '', daily_time = '', post_as = 'reel', caption_template = '{filename}', per_run = 1 } = req.body || {};
   if (!folder_path || !fs.existsSync(folder_path) || !fs.statSync(folder_path).isDirectory())
     return res.status(400).json({ error: 'Folder mojood nahi — sahi local path dein (e.g. C:\\Videos\\Uploads)' });
-  const page = db.prepare('SELECT * FROM pages WHERE id=?').get(page_id);
+  const page = db.prepare('SELECT * FROM pages WHERE id=? AND user_id=?').get(page_id, req.user.id);
   if (!page) return res.status(404).json({ error: 'Page not found' });
   if (!/^\d{2}:\d{2}$/.test(daily_time || '')) return res.status(400).json({ error: 'daily_time HH:MM format me dein (e.g. 20:00)' });
-  const st = db.prepare(`INSERT INTO watchers (name,folder_path,page_id,daily_time,post_as,caption_template,per_run,status)
-    VALUES (?,?,?,?,?,?,?,'active')`).run(
+  const st = db.prepare(`INSERT INTO watchers (name,folder_path,page_id,daily_time,post_as,caption_template,per_run,status,user_id)
+    VALUES (?,?,?,?,?,?,?,'active',?)`).run(
     name || path.basename(folder_path), folder_path, page_id, daily_time,
-    post_as === 'feed' ? 'feed' : 'reel', caption_template || '{filename}', Math.max(1, Math.min(20, +per_run || 1))
+    post_as === 'feed' ? 'feed' : 'reel', caption_template || '{filename}', Math.max(1, Math.min(20, +per_run || 1)), req.user.id
   );
   const w = db.prepare('SELECT * FROM watchers WHERE id=?').get(st.lastInsertRowid);
-  log('watcher_created', `#${w.id} ${w.name} → ${page.name} @ ${daily_time} (${listMediaFiles(folder_path).length} files)`);
+  log('watcher_created', `#${w.id} ${w.name} → ${page.name} @ ${daily_time} (${listMediaFiles(folder_path).length} files)`, req.user.id);
   const fc = listMediaFiles(folder_path).length;
   const stockOf = fc < 11 ? 'critical' : fc < 20 ? 'watch' : fc < 30 ? 'low' : 'ok';
   res.json({ watcher: { ...w, files: fc, days_left: Math.floor(fc / Math.max(1, w.per_run || 1)), stock: stockOf } });
 });
 app.put('/api/watchers/:id', (req, res) => {
-  const w = db.prepare('SELECT * FROM watchers WHERE id=?').get(req.params.id);
+  const w = db.prepare('SELECT * FROM watchers WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
   if (!w) return res.status(404).json({ error: 'Watcher not found' });
   const { name, daily_time, page_id, post_as, caption_template, per_run, status } = req.body || {};
   if (daily_time && !/^\d{2}:\d{2}$/.test(daily_time)) return res.status(400).json({ error: 'daily_time HH:MM me dein' });
-  if (page_id && !db.prepare('SELECT id FROM pages WHERE id=?').get(page_id)) return res.status(404).json({ error: 'Page not found' });
+  if (page_id && !db.prepare('SELECT id FROM pages WHERE id=? AND user_id=?').get(page_id, req.user.id)) return res.status(404).json({ error: 'Page not found' });
   db.prepare(`UPDATE watchers SET name=?, daily_time=?, page_id=?, post_as=?, caption_template=?, per_run=?, status=? WHERE id=?`).run(
     name ?? w.name, daily_time ?? w.daily_time, page_id ?? w.page_id,
     post_as ? (post_as === 'feed' ? 'feed' : 'reel') : w.post_as,
     caption_template ?? w.caption_template, per_run ? Math.max(1, Math.min(20, +per_run)) : w.per_run,
     status === 'paused' ? 'paused' : 'active', w.id
   );
-  log('watcher_updated', `#${w.id} updated`);
+  log('watcher_updated', `#${w.id} updated`, req.user.id);
   res.json({ watcher: db.prepare('SELECT * FROM watchers WHERE id=?').get(w.id) });
 });
 app.delete('/api/watchers/:id', (req, res) => {
-  db.prepare('DELETE FROM watchers WHERE id=?').run(req.params.id);
-  log('watcher_deleted', `#${req.params.id} deleted (files untouched)`);
+  db.prepare('DELETE FROM watchers WHERE id=? AND user_id=?').run(req.params.id, req.user.id);
+  log('watcher_deleted', `#${req.params.id} deleted (files untouched)`, req.user.id);
   res.json({ ok: true });
 });
 app.post('/api/watchers/:id/run', async (req, res) => {
-  const w = db.prepare('SELECT * FROM watchers WHERE id=?').get(req.params.id);
+  const w = db.prepare('SELECT * FROM watchers WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
   if (!w) return res.status(404).json({ error: 'Watcher not found' });
   const r = await processWatcher(w);
   if (!r.ok) return res.status(502).json(r);
@@ -815,10 +914,10 @@ async function processInstant(w) {
         );
         fs.unlinkSync(f.path); // delete SIRF record ke baad
         fileSeen.delete(f.path);
-        log('instant_published', `${page.name}: ${f.name} (fb:${fbId}) — file deleted`);
+        log('instant_published', `${page.name}: ${f.name} (fb:${fbId}) — file deleted`, w.user_id);
         done++;
       } catch (e) {
-        log('instant_failed', `${f.name}: ${(e.message || JSON.stringify(fb.fbErr(e))).slice(0, 150)}`);
+        log('instant_failed', `${f.name}: ${(e.message || JSON.stringify(fb.fbErr(e))).slice(0, 150)}`, w.user_id);
         break;
       }
     }
@@ -830,7 +929,7 @@ async function processInstant(w) {
 }
 
 app.get('/api/instant', (req, res) => {
-  const list = db.prepare('SELECT * FROM instant_watchers ORDER BY id DESC').all().map((w) => {
+  const list = db.prepare('SELECT * FROM instant_watchers WHERE user_id=? ORDER BY id DESC').all(req.user.id).map((w) => {
     const page = db.prepare('SELECT id, name FROM pages WHERE id=?').get(w.page_id);
     return { ...w, page_name: page ? page.name : '(page missing)', files: listMediaFiles(w.folder_path).length };
   });
@@ -840,38 +939,38 @@ app.post('/api/instant', (req, res) => {
   const { name = '', folder_path = '', page_id = '', post_as = 'reel', caption_template = '{filename}', per_scan = 5 } = req.body || {};
   if (!folder_path || !fs.existsSync(folder_path) || !fs.statSync(folder_path).isDirectory())
     return res.status(400).json({ error: 'Folder mojood nahi — sahi local path dein (e.g. C:\\Videos\\Instant)' });
-  const page = db.prepare('SELECT * FROM pages WHERE id=?').get(page_id);
+  const page = db.prepare('SELECT * FROM pages WHERE id=? AND user_id=?').get(page_id, req.user.id);
   if (!page) return res.status(404).json({ error: 'Page not found' });
-  const st = db.prepare(`INSERT INTO instant_watchers (name,folder_path,page_id,post_as,caption_template,per_scan,status)
-    VALUES (?,?,?,?,?,?,'active')`).run(
+  const st = db.prepare(`INSERT INTO instant_watchers (name,folder_path,page_id,post_as,caption_template,per_scan,status,user_id)
+    VALUES (?,?,?,?,?,?,'active',?)`).run(
     name || path.basename(folder_path), folder_path, page_id,
-    post_as === 'feed' ? 'feed' : 'reel', caption_template || '{filename}', Math.max(1, Math.min(20, +per_scan || 5))
+    post_as === 'feed' ? 'feed' : 'reel', caption_template || '{filename}', Math.max(1, Math.min(20, +per_scan || 5)), req.user.id
   );
   const w = db.prepare('SELECT * FROM instant_watchers WHERE id=?').get(st.lastInsertRowid);
-  log('instant_created', `#${w.id} ${w.name} → ${page.name} (instant, ${listMediaFiles(folder_path).length} files pending)`);
+  log('instant_created', `#${w.id} ${w.name} → ${page.name} (instant, ${listMediaFiles(folder_path).length} files pending)`, req.user.id);
   res.json({ watcher: { ...w, files: listMediaFiles(folder_path).length } });
 });
 app.put('/api/instant/:id', (req, res) => {
-  const w = db.prepare('SELECT * FROM instant_watchers WHERE id=?').get(req.params.id);
+  const w = db.prepare('SELECT * FROM instant_watchers WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
   if (!w) return res.status(404).json({ error: 'Watcher not found' });
   const { name, page_id, post_as, caption_template, per_scan, status } = req.body || {};
-  if (page_id && !db.prepare('SELECT id FROM pages WHERE id=?').get(page_id)) return res.status(404).json({ error: 'Page not found' });
+  if (page_id && !db.prepare('SELECT id FROM pages WHERE id=? AND user_id=?').get(page_id, req.user.id)) return res.status(404).json({ error: 'Page not found' });
   db.prepare('UPDATE instant_watchers SET name=?, page_id=?, post_as=?, caption_template=?, per_scan=?, status=? WHERE id=?').run(
     name ?? w.name, page_id ?? w.page_id,
     post_as ? (post_as === 'feed' ? 'feed' : 'reel') : w.post_as,
     caption_template ?? w.caption_template, per_scan ? Math.max(1, Math.min(20, +per_scan)) : w.per_scan,
     status === 'paused' ? 'paused' : 'active', w.id
   );
-  log('instant_updated', `#${w.id} updated`);
+  log('instant_updated', `#${w.id} updated`, req.user.id);
   res.json({ watcher: db.prepare('SELECT * FROM instant_watchers WHERE id=?').get(w.id) });
 });
 app.delete('/api/instant/:id', (req, res) => {
-  db.prepare('DELETE FROM instant_watchers WHERE id=?').run(req.params.id);
-  log('instant_deleted', `#${req.params.id} deleted (files untouched)`);
+  db.prepare('DELETE FROM instant_watchers WHERE id=? AND user_id=?').run(req.params.id, req.user.id);
+  log('instant_deleted', `#${req.params.id} deleted (files untouched)`, req.user.id);
   res.json({ ok: true });
 });
 app.post('/api/instant/:id/scan', async (req, res) => {
-  const w = db.prepare('SELECT * FROM instant_watchers WHERE id=?').get(req.params.id);
+  const w = db.prepare('SELECT * FROM instant_watchers WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
   if (!w) return res.status(404).json({ error: 'Watcher not found' });
   const r = await processInstant(w);
   if (!r.ok) return res.status(502).json(r);
@@ -881,7 +980,7 @@ app.post('/api/instant/:id/scan', async (req, res) => {
 // ---------- Cron: local scheduled queue → FB publish (Asia/Karachi, har minute) ----------
 // SIRF local queue (fb_post_id khali) — FB-scheduled posts FB khud publish karta hai.
 cron.schedule('* * * * *', async () => {
-  if (!fb.isConnected()) return;
+  // auth nahi — sab users ki due queue process hoti hai (page-token page-level hai)
   const due = db.prepare("SELECT * FROM posts WHERE status='scheduled' AND scheduled_time<>'' AND datetime(scheduled_time)<=datetime('now') AND (fb_post_id='' OR fb_post_id IS NULL)").all();
   for (const p of due) {
     const page = db.prepare('SELECT * FROM pages WHERE id=?').get(p.page_id);
@@ -918,7 +1017,7 @@ cron.schedule('* * * * *', async () => {
     const due = db.prepare("SELECT * FROM watchers WHERE status='active' AND daily_time=? AND (last_run IS NULL OR last_run<>?)").all(hm, today);
     for (const w of due) {
       db.prepare('UPDATE watchers SET last_run=? WHERE id=?').run(today, w.id);
-      log('watcher_fired', `#${w.id} ${w.name} @ ${hm}`);
+      log('watcher_fired', `#${w.id} ${w.name} @ ${hm}`, w.user_id);
       await processWatcher(w);
     }
   } catch (e) { log('watcher_cron_error', String(e.message || e).slice(0, 150)); }

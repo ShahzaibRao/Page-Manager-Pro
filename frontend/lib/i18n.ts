@@ -91,6 +91,7 @@ const en = {
   global_title: "All Pages • Views vs Engagements", viral_global: "🔥 Global Viral Posts • Top 10",
   breakdown: "Pages Breakdown", jwt_pages: "pages",
   backend_off: "Backend is offline (localhost:4000) — start it:",
+  auth_login: "Login", auth_signup: "Sign Up", auth_email: "Email", auth_password: "Password", auth_name: "Name", auth_google: "Continue with Google", auth_have: "Already have an account? Login", auth_new: "New here? Create account", auth_logout: "Logout", auth_tag: "One dashboard for all your Business Manager pages.",
 };
 
 const ur: typeof en = {
@@ -171,6 +172,7 @@ const ur: typeof en = {
   global_title: "All Pages • Views vs Engagements", viral_global: "🔥 Global Viral Posts • Top 10",
   breakdown: "Pages Breakdown", jwt_pages: "pages",
   backend_off: "Backend offline hai (localhost:4000) — start karein:",
+  auth_login: "Login", auth_signup: "Sign Up", auth_email: "Email", auth_password: "Password", auth_name: "Naam", auth_google: "Google se continue", auth_have: "Account hai? Login karein", auth_new: "Naye hain? Account banayein", auth_logout: "Logout", auth_tag: "Aapke saare Business Manager pages ke liye ek dashboard.",
 };
 
 const es: typeof en = {
@@ -251,6 +253,7 @@ const es: typeof en = {
   global_title: "Todas • Vistas vs Interacción", viral_global: "🔥 Virales globales • Top 10",
   breakdown: "Desglose por página", jwt_pages: "páginas",
   backend_off: "Backend apagado (localhost:4000) — inícialo:",
+  auth_login: "Entrar", auth_signup: "Registrarse", auth_email: "Correo", auth_password: "Contrasena", auth_name: "Nombre", auth_google: "Continuar con Google", auth_have: "Tienes cuenta? Entra", auth_new: "Nuevo? Crea cuenta", auth_logout: "Salir", auth_tag: "Un panel para todas tus paginas.",
 };
 
 const zh: typeof en = {
@@ -331,6 +334,7 @@ const zh: typeof en = {
   global_title: "全部 • 浏览 vs 互动", viral_global: "🔥 全局爆款 • Top 10",
   breakdown: "各主页明细", jwt_pages: "个主页",
   backend_off: "后端未运行(localhost:4000)——请启动:",
+  auth_login: "登录", auth_signup: "注册", auth_email: "邮箱", auth_password: "密码", auth_name: "姓名", auth_google: "使用 Google 继续", auth_have: "已有账号?登录", auth_new: "新用户?注册", auth_logout: "退出", auth_tag: "一个面板管理所有商务主页。",
 };
 
 const ar: typeof en = {
@@ -411,6 +415,7 @@ const ar: typeof en = {
   global_title: "الكل • مشاهدات مقابل تفاعل", viral_global: "🔥 رواج شامل • Top 10",
   breakdown: "تفصيل الصفحات", jwt_pages: "صفحات",
   backend_off: "الخادم متوقف (localhost:4000) — شغّله:",
+  auth_login: "دخول", auth_signup: "حساب جديد", auth_email: "البريد", auth_password: "كلمة المرور", auth_name: "الاسم", auth_google: "المتابعة عبر Google", auth_have: "لديك حساب؟ ادخل", auth_new: "جديد؟ أنشئ حسابا", auth_logout: "خروج", auth_tag: "لوحة واحدة لكل صفحاتك.",
 };
 
 export const DICT: Record<Lang, typeof en> = { en, ur, es, zh, ar };

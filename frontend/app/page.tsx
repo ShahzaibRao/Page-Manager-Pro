@@ -20,6 +20,7 @@ const Ic = {
   chart: (c: string) => <I cls={c} d="M3 3v18h18M7 15l4-6 4 3 5-8" />,
   cash: (c: string) => <I cls={c} d="M2 7h20v10H2zM16 12h.01M2 10h20" />,
   flame: (c: string) => <I cls={c} d="M12 22c4 0 7-2.7 7-6.5 0-4-3-6-3-9-3 1-4 3-4 3S9 7 9 4C5 7 5 12 5 15.5 5 19.3 8 22 12 22z" />,
+  logout: (c: string) => <I cls={c} d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />,
   zap: (c: string) => <I cls={c} d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />,
   folder: (c: string) => <I cls={c} d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />,
   gear: (c: string) => <I cls={c} d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z" />,
@@ -166,6 +167,18 @@ export default function Dashboard() {
   useEffect(() => { setPageNum(1); }, [pageFilter, pageSearch, pages.length, pageSort]);
   const say = (t: string) => { setToast(t); setTimeout(() => setToast(""), 4000); };
 
+  const [user, setUser] = useState<any>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [booted, setBooted] = useState(false); // pehli data-load complete — is se pehle neutral UI (no flash)
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPass, setAuthPass] = useState("");
+  const [authName, setAuthName] = useState("");
+  const [authErr, setAuthErr] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authCfg, setAuthCfg] = useState<any>({ google: false, google_client_id: "" });
+  const googleBtnRef = useRef<HTMLDivElement>(null);
+
   const refreshPages = async () => {
     try {
       const h = await api.health();
@@ -178,17 +191,76 @@ export default function Dashboard() {
       try {
         const pg = await api.pages();
         if ((pg.pages || []).length >= list.length) list = pg.pages;
-      } catch {}
+      } catch (e: any) {
+        if (e?.data?.need_login) return; // login nahi — backend off nahi
+        throw e;
+      }
       setPages(list);
-      if (list.length) {
+      if (list.length && selId !== "GLOBAL") {
         const cur = list.find((p: any) => p.id === selId);
         const preferred = cur || list.find((p: any) => p.can_post) || list[0];
-        setSelId(preferred.id);
+        if (preferred.id !== selId) setSelId(preferred.id);
       }
-    } catch { setBackendUp(false); }
+    } catch (e: any) {
+      if (e?.data?.need_login) return; // backend up hai, bas login chahiye
+      setBackendUp(false);
+    }
   };
 
-  useEffect(() => { (async () => { await refreshPages(); setLoading(false); })(); }, []);
+  useEffect(() => { (async () => {
+    try { setAuthCfg(await api.authConfig()); } catch {}
+    try { const m = await api.me(); setUser(m.user); } catch {}
+    setAuthChecked(true);
+  })(); }, []);
+
+  useEffect(() => {
+    if (!user) { setLoading(false); return; }
+    (async () => { await refreshPages(); setLoading(false); setBooted(true); })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  const doAuth = async () => {
+    setAuthErr("");
+    if (!authEmail.trim() || authPass.length < 6) { setAuthErr(authPass.length < 6 ? "Password min 6 characters" : "Email?"); return; }
+    setAuthBusy(true);
+    try {
+      const r = authMode === "signup"
+        ? await api.signup({ email: authEmail.trim(), password: authPass, name: authName.trim() })
+        : await api.login({ email: authEmail.trim(), password: authPass });
+      setUser(r.user);
+      setAuthPass("");
+    } catch (e: any) { setAuthErr(e.message || "Failed"); }
+    setAuthBusy(false);
+  };
+  const doGoogle = async (credential: string) => {
+    setAuthErr(""); setAuthBusy(true);
+    try {
+      const r = await api.google(credential);
+      setUser(r.user);
+    } catch (e: any) { setAuthErr(e.message || "Google failed"); }
+    setAuthBusy(false);
+  };
+  const doLogout = async () => {
+    try { await api.logout(); } catch {}
+    setUser(null); setPages([]); setConnected(false); setSelId(""); setTab("dashboard");
+    setInsights(null); setMonet(null); setViral(null); setOverview(null); setGviral(null); setHist(null);
+  };
+  // Google button (GIS) — sirf tab jab backend ne client id di ho
+  useEffect(() => {
+    if (user || !authCfg.google || !authCfg.google_client_id) return;
+    const w = window as any;
+    const render = () => {
+      if (!w.google || !googleBtnRef.current) return;
+      w.google.accounts.id.initialize({ client_id: authCfg.google_client_id, callback: (r: any) => doGoogle(r.credential), auto_select: false });
+      w.google.accounts.id.renderButton(googleBtnRef.current, { theme: "filled_blue", size: "large", width: 320 });
+    };
+    if (w.google) { render(); return; }
+    const s = document.createElement("script");
+    s.src = "https://accounts.google.com/gsi/client";
+    s.async = true; s.defer = true; s.onload = render;
+    document.head.appendChild(s);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, authCfg]);
 
   useEffect(() => {
     if (!sel || sel.id === "GLOBAL") return;
@@ -456,6 +528,57 @@ export default function Dashboard() {
     </div>
   ) : null;
 
+  /* ================= AUTH SCREEN ================= */
+  const AuthScreen = (
+    <div className="min-h-screen t-bg t-text flex items-center justify-center p-4">
+      <div className="w-full max-w-[420px] rounded-[20px] t-card border t-line p-6 lg:p-8 relative overflow-hidden">
+        <div className="absolute -top-20 -right-20 w-56 h-56 bg-[#1877F2]/15 blur-[60px] rounded-full" />
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-[12px] bg-[#1877F2] flex items-center justify-center font-bold text-[16px] shadow-[0_0_20px_rgba(24,119,242,0.4)]">P</div>
+          <div>
+            <div className="font-semibold text-[16px]">Page Manager Pro</div>
+            <div className="text-[11px] t-m2">{t(lang, "auth_tag")}</div>
+          </div>
+        </div>
+        <div className="mt-6 flex gap-2">
+          {(["login", "signup"] as const).map((m) => (
+            <button key={m} onClick={() => { setAuthMode(m); setAuthErr(""); }}
+              className={`flex-1 h-9 rounded-full text-[13px] font-medium ${authMode === m ? "bg-[#1877F2]" : "t-panel border t-line3 t-m1"}`}>
+              {m === "login" ? t(lang, "auth_login") : t(lang, "auth_signup")}
+            </button>
+          ))}
+        </div>
+        <div className="mt-4 space-y-3">
+          {authMode === "signup" && (
+            <input value={authName} onChange={(e) => setAuthName(e.target.value)} placeholder={t(lang, "auth_name")}
+              className="w-full h-11 rounded-[12px] t-bg border t-line px-4 text-[13px] focus:outline-none" />
+          )}
+          <input value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} placeholder={t(lang, "auth_email")} type="email" autoComplete="email"
+            className="w-full h-11 rounded-[12px] t-bg border t-line px-4 text-[13px] focus:outline-none" onKeyDown={(e) => e.key === "Enter" && doAuth()} />
+          <input value={authPass} onChange={(e) => setAuthPass(e.target.value)} placeholder={t(lang, "auth_password")} type="password" autoComplete={authMode === "signup" ? "new-password" : "current-password"}
+            className="w-full h-11 rounded-[12px] t-bg border t-line px-4 text-[13px] focus:outline-none" onKeyDown={(e) => e.key === "Enter" && doAuth()} />
+        </div>
+        {authErr && <div className="mt-3 p-2.5 rounded-[10px] bg-[#2A1515] border border-red-900 text-[12px] text-red-400">{authErr}</div>}
+        <button onClick={doAuth} disabled={authBusy}
+          className="mt-4 w-full h-11 rounded-full bg-[#1877F2] text-[14px] font-medium hover:bg-[#166FE5] disabled:opacity-50">
+          {authBusy ? "..." : authMode === "login" ? t(lang, "auth_login") : t(lang, "auth_signup")}
+        </button>
+        <button onClick={() => { setAuthMode(authMode === "login" ? "signup" : "login"); setAuthErr(""); }}
+          className="mt-3 w-full text-center text-[12px] t-m2 t-texth">
+          {authMode === "login" ? t(lang, "auth_new") : t(lang, "auth_have")}
+        </button>
+        {authCfg.google && (
+          <>
+            <div className="my-4 flex items-center gap-3 text-[11px] t-m3">
+              <span className="flex-1 border-t t-line" /><span>OR</span><span className="flex-1 border-t t-line" />
+            </div>
+            <div ref={googleBtnRef} className="flex justify-center min-h-[40px]" />
+          </>
+        )}
+      </div>
+    </div>
+  );
+
   /* ================= CONNECT SCREEN ================= */
   const ConnectCard = (
     <div className="max-w-[640px] rounded-[20px] t-card border t-line p-6 lg:p-8 relative overflow-hidden">
@@ -517,18 +640,18 @@ export default function Dashboard() {
               {t(lang, "sys_token")}
             </div>
             <p className="text-[11px] t-m2 mt-2 leading-[1.5]">{t(lang, "sys_token_desc")}</p>
-            <div className={`mt-3 flex items-center gap-2 text-[11px] font-medium ${connected ? "text-[#3DD598]" : "text-[#FFB86A]"}`}>
-              <span className={`w-2 h-2 rounded-full animate-pulse ${connected ? "bg-[#3DD598]" : "bg-[#FFB86A]"}`} />
-              {connected ? `${t(lang, "token_on")} • ${pages.length} ${t(lang, "jwt_pages")}` : t(lang, "token_off")}
+            <div className={`mt-3 flex items-center gap-2 text-[11px] font-medium ${!booted ? "t-m2" : connected ? "text-[#3DD598]" : "text-[#FFB86A]"}`}>
+              <span className={`w-2 h-2 rounded-full animate-pulse ${!booted ? "bg-current" : connected ? "bg-[#3DD598]" : "bg-[#FFB86A]"}`} />
+              {!booted ? "…" : connected ? `${t(lang, "token_on")} • ${pages.length} ${t(lang, "jwt_pages")}` : t(lang, "token_off")}
             </div>
           </div>
         </div>
         <div className="p-3 border-t t-line2">
           <div className="flex items-center gap-3 px-3 py-2.5 rounded-[12px] t-card border t-line">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#1877F2] to-[#0A58CA] flex items-center justify-center text-[12px] font-bold">SR</div>
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#1877F2] to-[#0A58CA] flex items-center justify-center text-[12px] font-bold">{(user?.name || user?.email || "U").slice(0, 1).toUpperCase()}</div>
             <div className="flex-1 min-w-0">
-              <div className="text-[13px] font-medium truncate">Shahzaib Rao</div>
-              <div className="text-[11px] t-m2 truncate">{t(lang, "role_admin")}</div>
+              <div className="text-[13px] font-medium truncate">{user?.name || user?.email || ""}</div>
+              <div className="text-[11px] t-m2 truncate">{user?.email || ""}</div>
             </div>
           </div>
         </div>
@@ -564,9 +687,9 @@ export default function Dashboard() {
             </div>
           </button>
           <div className="hidden md:flex items-center gap-2 text-[13px]">
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border ${connected ? "bg-[#132E1F] border-[#1E4A2E] text-[#3DD598]" : "bg-[#2A1F15] border-[#4A3520] text-[#FFB86A]"}`}>
-              <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${connected ? "bg-[#3DD598]" : "bg-[#FFB86A]"}`} />
-              {connected ? t(lang, "connected") : t(lang, "not_connected")}
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border ${!booted ? "t-card border t-line t-m2" : connected ? "bg-[#132E1F] border-[#1E4A2E] text-[#3DD598]" : "bg-[#2A1F15] border-[#4A3520] text-[#FFB86A]"}`}>
+              <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${!booted ? "bg-current" : connected ? "bg-[#3DD598]" : "bg-[#FFB86A]"}`} />
+              {!booted ? "…" : connected ? t(lang, "connected") : t(lang, "not_connected")}
             </div>
             <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full t-card border t-line t-m1 text-[12px]">
               {Ic.shield("w-3.5 h-3.5 t-m2")} {t(lang, "sys_token")}
@@ -648,7 +771,9 @@ export default function Dashboard() {
                 </div>
               )}
             </div>
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#8B5CF6] to-[#1877F2] flex items-center justify-center text-[12px] font-bold">SR</div>
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#8B5CF6] to-[#1877F2] flex items-center justify-center text-[12px] font-bold" title={user?.email || ""}>{(user?.name || user?.email || "U").slice(0, 1).toUpperCase()}</div>
+            <button onClick={doLogout} title={t(lang, "auth_logout")}
+              className="w-8 h-8 rounded-full t-card border t-line hidden sm:flex items-center justify-center t-m2 hover:text-red-400">{Ic.logout("w-3.5 h-3.5")}</button>
           </div>
         </header>
 
@@ -667,8 +792,10 @@ export default function Dashboard() {
             </div>
           )}
 
-          {loading ? (
+          {!authChecked || loading || (user && !booted) ? (
             <div className="t-m2 text-[14px]">{t(lang, "loading")}</div>
+          ) : !user ? (
+            <>{AuthScreen}</>
           ) : !connected || pages.length === 0 ? (
             <>{ConnectCard}</>
           ) : (
