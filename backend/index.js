@@ -572,6 +572,34 @@ app.get('/api/viral-global', async (req, res) => {
   });
 });
 
+// ---------- Module I: Posting history (auto-folder/creator/manual sab ka daily report) ----------
+// GET /api/history?range=7|28|90&page_id=(optional)
+app.get('/api/history', (req, res) => {
+  const days = [7, 28, 90].includes(+req.query.range) ? +req.query.range : 28;
+  const { page_id } = req.query;
+  const w = [`datetime(created_at) >= datetime('now','-${days} days')`];
+  const p = [];
+  if (page_id) { w.push('(page_id=? OR page_id=(SELECT id FROM pages WHERE fb_page_id=?))'); p.push(page_id, page_id); }
+  const where = 'WHERE ' + w.join(' AND ');
+  const breakdown = db.prepare(
+    `SELECT type, COUNT(*) c FROM posts ${where} AND status='published' AND (error_note='' OR error_note IS NULL) GROUP BY type`
+  ).all(...p);
+  const byType = { text: 0, link: 0, photo: 0, video: 0, reel: 0 };
+  for (const r of breakdown) if (r.type in byType) byType[r.type] = r.c;
+  const daily = db.prepare(
+    `SELECT date(created_at) d, page_id,
+      SUM(CASE WHEN status='published' AND (error_note='' OR error_note IS NULL) THEN 1 ELSE 0 END) published,
+      SUM(CASE WHEN error_note<>'' AND error_note IS NOT NULL THEN 1 ELSE 0 END) failed,
+      GROUP_CONCAT(CASE WHEN error_note<>'' AND error_note IS NOT NULL THEN substr(error_note,1,120) END, ' || ') errors
+     FROM posts ${where} GROUP BY d, page_id ORDER BY d DESC`
+  ).all(...p).map((r) => {
+    const pg = db.prepare('SELECT name FROM pages WHERE id=?').get(r.page_id);
+    return { date: r.d, page_id: r.page_id, page_name: pg ? pg.name : r.page_id, published: r.published, failed: r.failed, errors: r.errors || '' };
+  });
+  const total = byType.text + byType.link + byType.photo + byType.video + byType.reel;
+  res.json({ range_days: days, total, by_type: byType, daily });
+});
+
 // ---------- Module F: Logs + Token health ----------
 app.get('/api/logs', (req, res) => res.json({ logs: db.prepare('SELECT * FROM logs ORDER BY id DESC LIMIT 100').all() }));
 app.get('/api/token/health', async (req, res) => {

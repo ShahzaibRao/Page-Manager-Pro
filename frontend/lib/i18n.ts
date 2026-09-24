@@ -15,7 +15,7 @@ export type Theme = (typeof THEMES)[number]["id"];
 
 const en = {
   workspace: "Workspace", business_suite: "BUSINESS SUITE",
-  nav_dashboard: "Dashboard", nav_pages: "Pages", nav_create: "Create Post", nav_scheduled: "Scheduled",
+  nav_dashboard: "Dashboard", nav_pages: "Pages", nav_create: "Create Post", nav_scheduled: "Scheduled", nav_reports: "Reports",
   nav_folders: "Auto Folder", nav_creator: "Creator Watch", nav_insights: "Insights", nav_monetization: "Monetization",
   nav_viral: "Viral Posts", nav_settings: "Settings", sub_bm: "Business Manager",
   role_admin: "Admin • Business Manager", sys_token: "System User Token",
@@ -25,7 +25,7 @@ const en = {
   sync: "Sync", switcher_title: "Posting Access", overall_sub: "posting-access pages • overall insights",
   all_pages_global: "All Pages (Global)",
   t_dashboard: "Welcome back, Admin 👋", t_pages: "Business Manager Pages", t_create: "Create Post",
-  t_scheduled: "Scheduled Posts", t_folders: "Auto Folder Uploader", t_creator: "Creator Watch", t_insights: "Insights & Analytics",
+  t_scheduled: "Scheduled Posts", t_reports: "Posting Reports", rep_total: "Total Posts", rep_text: "Text", rep_photos: "Photos", rep_videos: "Videos", rep_reels: "Reels", rep_daily: "Daily Report", rep_published: "Posted", rep_failed: "Failed", rep_errors: "Errors", rep_empty: "No posts in this range.", rep_view: "View full report", t_folders: "Auto Folder Uploader", t_creator: "Creator Watch", t_insights: "Insights & Analytics",
   t_monetization: "Monetization Center", t_viral: "Viral Posts Lab", t_settings: "Settings",
   sub_pages: "All pages connected via System User Token • Secure server-side auth",
   sub_real: "Real Facebook data — no demo content",
@@ -95,7 +95,7 @@ const en = {
 
 const ur: typeof en = {
   workspace: "Workspace", business_suite: "BUSINESS SUITE",
-  nav_dashboard: "Dashboard", nav_pages: "Pages", nav_create: "Post Banayein", nav_scheduled: "Scheduled",
+  nav_dashboard: "Dashboard", nav_pages: "Pages", nav_create: "Post Banayein", nav_scheduled: "Scheduled", nav_reports: "Reports",
   nav_folders: "Auto Folder", nav_creator: "Creator Watch", nav_insights: "Insights", nav_monetization: "Monetization",
   nav_viral: "Viral Posts", nav_settings: "Settings", sub_bm: "Business Manager",
   role_admin: "Admin • Business Manager", sys_token: "System User Token",
@@ -105,7 +105,7 @@ const ur: typeof en = {
   sync: "Sync", switcher_title: "Posting Access", overall_sub: "posting-access pages • overall insights",
   all_pages_global: "All Pages (Global)",
   t_dashboard: "Welcome back, Admin 👋", t_pages: "Business Manager Pages", t_create: "Post Banayein",
-  t_scheduled: "Scheduled Posts", t_folders: "Auto Folder Uploader", t_creator: "Creator Watch", t_insights: "Insights & Analytics",
+  t_scheduled: "Scheduled Posts", t_reports: "Posting Reports", rep_total: "Total Posts", rep_text: "Text", rep_photos: "Photos", rep_videos: "Videos", rep_reels: "Reels", rep_daily: "Daily Report", rep_published: "Post hui", rep_failed: "Fail hui", rep_errors: "Errors", rep_empty: "Is range me koi post nahi.", rep_view: "Full report dekhein", t_folders: "Auto Folder Uploader", t_creator: "Creator Watch", t_insights: "Insights & Analytics",
   t_monetization: "Monetization Center", t_viral: "Viral Posts Lab", t_settings: "Settings",
   sub_pages: "Saare pages System User Token se connected • Secure server-side auth",
   sub_real: "Real Facebook data — koi demo content nahi",
@@ -175,7 +175,7 @@ const ur: typeof en = {
 
 const es: typeof en = {
   workspace: "Espacio", business_suite: "BUSINESS SUITE",
-  nav_dashboard: "Panel", nav_pages: "Páginas", nav_create: "Crear publicación", nav_scheduled: "Programadas",
+  nav_dashboard: "Panel", nav_pages: "Páginas", nav_create: "Crear publicación", nav_scheduled: "Programadas", nav_reports: "Informes",
   nav_folders: "Carpeta auto", nav_creator: "Creator Watch", nav_insights: "Estadísticas", nav_monetization: "Monetización",
   nav_viral: "Viral", nav_settings: "Ajustes", sub_bm: "Business Manager",
   role_admin: "Admin • Business Manager", sys_token: "Token de usuario del sistema",
@@ -185,7 +185,7 @@ const es: typeof en = {
   sync: "Sincronizar", switcher_title: "Acceso de publicación", overall_sub: "páginas con acceso • resumen global",
   all_pages_global: "Todas las páginas (Global)",
   t_dashboard: "Hola de nuevo, Admin 👋", t_pages: "Páginas de Business Manager", t_create: "Crear publicación",
-  t_scheduled: "Publicaciones programadas", t_folders: "Subida auto de carpeta", t_creator: "Creator Watch", t_insights: "Estadísticas",
+  t_scheduled: "Publicaciones programadas", t_reports: "Informes de publicación", rep_total: "Total", rep_text: "Texto", rep_photos: "Fotos", rep_videos: "Videos", rep_reels: "Reels", rep_daily: "Reporte diario", rep_published: "Publicadas", rep_failed: "Fallidas", rep_errors: "Errores", rep_empty: "Nada en este rango.", rep_view: "Ver informe", t_folders: "Subida auto de carpeta", t_creator: "Creator Watch", t_insights: "Estadísticas",
   t_monetization: "Centro de monetización", t_viral: "Laboratorio viral", t_settings: "Ajustes",
   sub_pages: "Todas las páginas conectadas por token • Auth segura en servidor",
   sub_real: "Datos reales de Facebook — sin demos",
@@ -255,7 +255,7 @@ const es: typeof en = {
 
 const zh: typeof en = {
   workspace: "工作区", business_suite: "BUSINESS SUITE",
-  nav_dashboard: "仪表盘", nav_pages: "主页", nav_create: "发帖", nav_scheduled: "定时",
+  nav_dashboard: "仪表盘", nav_pages: "主页", nav_create: "发帖", nav_scheduled: "定时", nav_reports: "发布报告",
   nav_folders: "自动文件夹", nav_creator: "Creator Watch", nav_insights: "数据分析", nav_monetization: "变现",
   nav_viral: "爆款帖子", nav_settings: "设置", sub_bm: "商务管理平台",
   role_admin: "管理员 • 商务管理平台", sys_token: "系统用户令牌",
@@ -265,7 +265,7 @@ const zh: typeof en = {
   sync: "同步", switcher_title: "发布权限", overall_sub: "有发布权限的主页 • 全局总览",
   all_pages_global: "全部主页(全局)",
   t_dashboard: "欢迎回来,管理员 👋", t_pages: "商务管理平台主页", t_create: "发帖",
-  t_scheduled: "定时帖子", t_folders: "文件夹自动上传", t_creator: "Creator Watch", t_insights: "数据分析",
+  t_scheduled: "定时帖子", t_reports: "发布报告", rep_total: "总帖子", rep_text: "文字", rep_photos: "图片", rep_videos: "视频", rep_reels: "Reels", rep_daily: "每日报告", rep_published: "已发布", rep_failed: "失败", rep_errors: "错误", rep_empty: "此范围无帖子。", rep_view: "查看完整报告", t_folders: "文件夹自动上传", t_creator: "Creator Watch", t_insights: "数据分析",
   t_monetization: "变现中心", t_viral: "爆款实验室", t_settings: "设置",
   sub_pages: "所有主页均通过系统令牌连接 • 服务器端安全认证",
   sub_real: "真实 Facebook 数据——无演示数据",
@@ -335,7 +335,7 @@ const zh: typeof en = {
 
 const ar: typeof en = {
   workspace: "مساحة العمل", business_suite: "BUSINESS SUITE",
-  nav_dashboard: "لوحة التحكم", nav_pages: "الصفحات", nav_create: "إنشاء منشور", nav_scheduled: "المجدولة",
+  nav_dashboard: "لوحة التحكم", nav_pages: "الصفحات", nav_create: "إنشاء منشور", nav_scheduled: "المجدولة", nav_reports: "التقارير",
   nav_folders: "مجلد تلقائي", nav_creator: "Creator Watch", nav_insights: "الإحصاءات", nav_monetization: "تحقيق الدخل",
   nav_viral: "المنشورات الرائجة", nav_settings: "الإعدادات", sub_bm: "مدير الأعمال",
   role_admin: "مشرف • مدير الأعمال", sys_token: "رمز مستخدم النظام",
@@ -345,7 +345,7 @@ const ar: typeof en = {
   sync: "مزامنة", switcher_title: "صلاحية النشر", overall_sub: "صفحات النشر • نظرة شاملة",
   all_pages_global: "كل الصفحات (شامل)",
   t_dashboard: "مرحباً بعودتك 👋", t_pages: "صفحات مدير الأعمال", t_create: "إنشاء منشور",
-  t_scheduled: "المنشورات المجدولة", t_folders: "الرفع التلقائي", t_creator: "Creator Watch", t_insights: "الإحصاءات",
+  t_scheduled: "المنشورات المجدولة", t_reports: "تقارير النشر", rep_total: "المنشورات", rep_text: "نص", rep_photos: "صور", rep_videos: "فيديو", rep_reels: "ريلز", rep_daily: "تقرير يومي", rep_published: "نُشرت", rep_failed: "فشلت", rep_errors: "أخطاء", rep_empty: "لا شيء.", rep_view: "التقرير الكامل", t_folders: "الرفع التلقائي", t_creator: "Creator Watch", t_insights: "الإحصاءات",
   t_monetization: "مركز تحقيق الدخل", t_viral: "مختبر الرواج", t_settings: "الإعدادات",
   sub_pages: "كل الصفحات متصلة بالرمز • مصادقة آمنة",
   sub_real: "بيانات فيسبوك حقيقية — بلا تجريبي",

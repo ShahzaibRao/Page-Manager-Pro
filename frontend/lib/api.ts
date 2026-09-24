@@ -68,6 +68,7 @@ export const api = {
   topPosts: (pageId: string, sort = "reach") => req(`/api/fb/${pageId}/top-posts?sort=${sort}`),
   overview: (range = 28) => req(`/api/overview?range=${range}`),
   viralGlobal: (limit = 10) => req(`/api/viral-global?limit=${limit}`),
+  history: (range = 28, pageId = "") => req(`/api/history?range=${range}${pageId ? `&page_id=${pageId}` : ""}`),
   logs: () => req("/api/logs"),
   tokenHealth: () => req("/api/token/health"),
 };

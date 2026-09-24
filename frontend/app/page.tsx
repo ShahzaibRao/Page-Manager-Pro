@@ -16,6 +16,7 @@ const Ic = {
   pages: (c: string) => <I cls={c} d="M4 4h16v12H4zM8 20h8M12 16v4" />,
   plus: (c: string) => <I cls={c} d="M12 5v14M5 12h14" />,
   clock: (c: string) => <I cls={c} d="M12 6v6l4 2M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z" />,
+  report: (c: string) => <I cls={c} d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />,
   chart: (c: string) => <I cls={c} d="M3 3v18h18M7 15l4-6 4 3 5-8" />,
   cash: (c: string) => <I cls={c} d="M2 7h20v10H2zM16 12h.01M2 10h20" />,
   flame: (c: string) => <I cls={c} d="M12 22c4 0 7-2.7 7-6.5 0-4-3-6-3-9-3 1-4 3-4 3S9 7 9 4C5 7 5 12 5 15.5 5 19.3 8 22 12 22z" />,
@@ -39,6 +40,7 @@ const NAV = [
   { id: "pages", k: "nav_pages", subk: "sub_bm", icon: Ic.pages },
   { id: "create", k: "nav_create", icon: Ic.plus },
   { id: "scheduled", k: "nav_scheduled", icon: Ic.clock },
+  { id: "reports", k: "nav_reports", icon: Ic.report },
   { id: "folders", k: "nav_folders", icon: Ic.folder },
   { id: "creator", k: "nav_creator", icon: Ic.zap },
   { id: "insights", k: "nav_insights", icon: Ic.chart },
@@ -48,7 +50,7 @@ const NAV = [
 ];
 const TITLE_KEYS: Record<string, string> = {
   dashboard: "t_dashboard", pages: "t_pages", create: "t_create",
-  scheduled: "t_scheduled", folders: "t_folders", creator: "t_creator", insights: "t_insights",
+  scheduled: "t_scheduled", reports: "t_reports", folders: "t_folders", creator: "t_creator", insights: "t_insights",
   monetization: "t_monetization", viral: "t_viral", settings: "t_settings",
 };
 const fmt = (n: number) => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "K" : `${n || 0}`;
@@ -132,6 +134,8 @@ export default function Dashboard() {
   const [overview, setOverview] = useState<any>(null);
   const [gviral, setGviral] = useState<any>(null);
   const [gloading, setGloading] = useState(false);
+  const [hist, setHist] = useState<any>(null);
+  const [hrange, setHrange] = useState(28);
   const sel = selId === "GLOBAL"
     ? { id: "GLOBAL", name: "All Pages", category: "Global • overall insights", followers_count: overview?.kpis?.followers ?? 0, can_post: false }
     : (pages.find((p) => p.id === selId) || pages.find((p) => p.can_post) || pages[0]);
@@ -215,6 +219,20 @@ export default function Dashboard() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selId, range]);
+
+  // posting history (dashboard widget + reports)
+  useEffect(() => {
+    if (!backendUp) return;
+    if (tab !== "dashboard" && tab !== "reports") return;
+    if (selId !== "GLOBAL" && !sel) return;
+    (async () => {
+      try {
+        const h = await api.history(hrange, selId === "GLOBAL" ? "" : (sel?.id || ""));
+        setHist(h);
+      } catch {}
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, hrange, selId, backendUp]);
 
   useEffect(() => {
     if (tab === "settings" && backendUp) {
@@ -357,6 +375,31 @@ export default function Dashboard() {
     { label: t(lang, "k_videos"), value: fmt(kpis?.video_views_3s ?? 0), icon: Ic.play, color: "#3DD598" },
   ];
   const queuedCount = (queue.local || []).length;
+
+  const rangeBtns = (val: number, set: (n: number) => void) => (
+    <div className="flex gap-2">{[7, 28, 90].map((r) => (
+      <button key={r} onClick={() => set(r)} className={`h-7 px-3 rounded-full text-[12px] ${val === r ? "bg-[#1877F2]" : "t-panel border t-line3 t-m1"}`}>{r}d</button>
+    ))}</div>
+  );
+  const histWidget = hist ? (
+    <div className="rounded-[18px] t-card border t-line p-5">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h3 className="text-[15px] font-semibold">{t(lang, "rep_daily")} • {hrange}d{isGlobal ? "" : ` • ${sel?.name || ""}`}</h3>
+        <div className="flex items-center gap-2">
+          {rangeBtns(hrange, setHrange)}
+          <button onClick={() => setTab("reports")} className="h-7 px-3 rounded-full text-[12px] t-panel border t-line3 t-m1">{t(lang, "rep_view")} →</button>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4">
+        {[[t(lang, "rep_total"), hist.total, "#1877F2"], [t(lang, "rep_text"), (hist.by_type.text || 0) + (hist.by_type.link || 0), "#8B5CF6"], [t(lang, "rep_photos"), hist.by_type.photo || 0, "#EC4899"], [t(lang, "rep_videos"), hist.by_type.video || 0, "#3DD598"], [t(lang, "rep_reels"), hist.by_type.reel || 0, "#FFB86A"]].map(([l, v, c]: any) => (
+          <div key={String(l)} className="rounded-[12px] t-inner border t-line p-3 text-center">
+            <div className="text-[20px] font-semibold" style={{ color: c }}>{v}</div>
+            <div className="text-[11px] t-m2 mt-0.5">{l}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  ) : null;
 
   /* ================= CONNECT SCREEN ================= */
   const ConnectCard = (
@@ -564,6 +607,7 @@ export default function Dashboard() {
                       </div>
                     ))}
                   </div>
+                  {histWidget}
                   <div className="rounded-[18px] t-card border t-line p-5 lg:p-6">
                     <div className="flex items-center justify-between">
                       <div><h3 className="text-[15px] font-semibold">{t(lang, "global_title")}</h3>
@@ -645,6 +689,7 @@ export default function Dashboard() {
                       </div>
                     ))}
                   </div>
+                  {histWidget}
                   {!insights ? (
                     <Empty title={t(lang, "insights_unavail")} sub={t(lang, "insights_unavail_sub")}
                       action={<button onClick={doSync} className="mt-4 h-9 px-5 rounded-full bg-[#1877F2] text-[13px] font-medium">{t(lang, "resync")}</button>} />
@@ -1152,6 +1197,58 @@ export default function Dashboard() {
               {/* ===== SETTINGS ===== */}
 
               {/* ===== SETTINGS ===== */}
+              {/* ===== REPORTS ===== */}
+              {tab === "reports" && (
+                <div className="space-y-6 max-w-[1080px]">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[12px] t-m2">{isGlobal ? t(lang, "all_pages_global") : sel?.name}</span>
+                    <span className="ml-auto" />
+                    {rangeBtns(hrange, setHrange)}
+                  </div>
+                  {hist ? (
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+                      {[[t(lang, "rep_total"), hist.total, "#1877F2"], [t(lang, "rep_text"), (hist.by_type.text || 0) + (hist.by_type.link || 0), "#8B5CF6"], [t(lang, "rep_photos"), hist.by_type.photo || 0, "#EC4899"], [t(lang, "rep_videos"), hist.by_type.video || 0, "#3DD598"], [t(lang, "rep_reels"), hist.by_type.reel || 0, "#FFB86A"]].map(([l, v, c]: any) => (
+                        <div key={String(l)} className="rounded-[18px] t-card border t-line p-5 relative overflow-hidden">
+                          <div className="absolute top-0 right-0 w-24 h-24 blur-[40px] opacity-20" style={{ background: c }} />
+                          <div className="text-[28px] font-semibold leading-none">{v}</div>
+                          <div className="text-[13px] t-m2 mt-1.5 font-medium">{l} • {hrange}d</div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="t-m2 text-[14px]">{t(lang, "loading")}</div>
+                  )}
+                  <div className="rounded-[18px] t-card border t-line overflow-hidden">
+                    <div className="p-5 border-b t-line font-semibold text-[15px]">{t(lang, "rep_daily")} • {hrange}d</div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left">
+                        <thead className="text-[11px] tracking-widest uppercase t-m3 border-b t-line">
+                          <tr>
+                            <th className="p-4 font-medium">{t(lang, "rep_daily").split(" ")[0]}</th>
+                            <th className="p-4 font-medium">{t(lang, "page_h")}</th>
+                            <th className="p-4 font-medium">{t(lang, "rep_published")}</th>
+                            <th className="p-4 font-medium">{t(lang, "rep_failed")}</th>
+                            <th className="p-4 font-medium">{t(lang, "rep_errors")}</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y t-divide">
+                          {(hist?.daily || []).map((r: any, i: number) => (
+                            <tr key={i} className="t-hover">
+                              <td className="p-4 text-[13px] whitespace-nowrap">{r.date}</td>
+                              <td className="p-4 text-[13px] font-medium">{r.page_name}</td>
+                              <td className="p-4 text-[13px] font-medium" style={{ color: r.published ? "#3DD598" : undefined }}>{r.published}</td>
+                              <td className="p-4 text-[13px] font-medium" style={{ color: r.failed ? "#FF6B6B" : undefined }}>{r.failed}</td>
+                              <td className="p-4 text-[11px] t-m2 max-w-[320px]"><div className="truncate" title={r.errors}>{r.errors || "—"}</div></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {!(hist?.daily || []).length && <div className="p-6 text-center t-m2 text-[13px]">{t(lang, "rep_empty")}</div>}
+                  </div>
+                </div>
+              )}
+
               {tab === "settings" && (
                 <div className="max-w-[720px] space-y-4">
                   <div className="rounded-[18px] t-card border t-line p-6">
