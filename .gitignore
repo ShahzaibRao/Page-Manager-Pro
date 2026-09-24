@@ -20,3 +20,4 @@ backend/node_modules/
 Thumbs.db
 *.log
 .vscode/
+*.visual-check.*

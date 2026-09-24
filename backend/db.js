@@ -3,8 +3,13 @@
 // NOTE: Koi fake/demo data seed NAHI hota. Saara data real Business Manager se sync hoga.
 const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
+const fs = require('fs');
 
-const db = new DatabaseSync(path.join(__dirname, 'data.db'));
+// DATA_DIR set ho (docker) to DB + uploads wahan; warna local folder (SQLite fallback)
+const DATA_DIR = process.env.DATA_DIR || __dirname;
+try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
+
+const db = new DatabaseSync(path.join(DATA_DIR, 'data.db'));
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS businesses (

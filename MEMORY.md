@@ -1,10 +1,14 @@
 # MEMORY — Page Manager Pro (local)
 
 > Har session me ye file parho, kaam ke baad update karo. Secrets kabhi yahan nahi likhne.
-> **Branch rule: saara kaam `dev` branch me hoga, `main` me nahi. Stable hone pe `main` me merge + tag.**
-> Branches: `main` (releases v0.1/v0.2) • `dev` (active work) • `staging` (pre-release mirror of dev).
+> **Branch rule: active kaam `staging` branch me hoga. `main` sirf stable releases (merge + tag). `dev` backup/working branch.**
+> Branches: `main` (releases v0.1/v0.2) • `dev` (working) • `staging` (ACTIVE).
 
 ## State (24 Sep 2026)
+- DOCKER LIVE (local): `docker compose` → postgres:16 + redis:7 + backend + frontend, all healthy. Backend `DATA_DIR=/data` (named volume `backenddata`, node-owned). Full sync verified in container (2797 pages). Frontend standalone build. STOPPED local npm servers (port clash se bachne ke liye docker hi chalao).
+- Architecture diagram: `docs/architecture.html` (archify, 9/9 checks; 1440×900 pe 63px scroll caveat).
+- Decisions (owner): auth Google+Email, self-hosted Postgres, step-by-step migration, SQLite fallback rakho (`DATA_DIR` unset = local).
+- NEXT phases (order): 1) Postgres+Prisma 2) BullMQ+Redis 3) Auth multi-user + token encryption 4) frontend split + React Query.
 - GitHub: https://github.com/ShahzaibRao/Page-Manager-Pro.git — main (v0.1, v0.2) + **dev** active. Secrets gitignored; zero tokens staged (sirf `EAAB...` docs placeholders).
 - Demo live: https://shahzaibrao.github.io/Page-Manager-Pro/ (`docs/`, workflow deploy). About + homepage set.
 - Stack: backend Express :4000 (node:sqlite `data.db`, node-cron Asia/Karachi) + frontend Next.js 14 :3000. Run: `start-all.bat`.

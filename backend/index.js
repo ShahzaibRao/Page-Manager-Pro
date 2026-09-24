@@ -223,9 +223,14 @@ app.get('/api/pages/:id', (req, res) => {
 
 // ---------- Module B: Post & Schedule (REAL FB publish, files included) ----------
 const multer = require('multer');
+const DATA_DIR = process.env.DATA_DIR || __dirname;
 const upload = multer({
   storage: multer.diskStorage({
-    destination: (req, file, cb) => cb(null, path.join(__dirname, 'uploads')),
+    destination: (req, file, cb) => {
+      const d = path.join(DATA_DIR, 'uploads');
+      try { fs.mkdirSync(d, { recursive: true }); } catch {}
+      cb(null, d);
+    },
     filename: (req, file, cb) => cb(null, Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '-' + String(file.originalname || 'file').replace(/[^a-zA-Z0-9._-]/g, '_')),
   }),
   fileFilter: (req, file, cb) => {
