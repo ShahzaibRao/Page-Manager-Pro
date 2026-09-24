@@ -208,6 +208,7 @@ export default function Dashboard() {
   };
 
   useEffect(() => { (async () => {
+    try { await api.health(); setBackendUp(true); } catch { setBackendUp(false); }
     try { setAuthCfg(await api.authConfig()); } catch {}
     try { const m = await api.me(); setUser(m.user); } catch {}
     setAuthChecked(true);
@@ -559,6 +560,11 @@ export default function Dashboard() {
             className="w-full h-11 rounded-[12px] t-bg border t-line px-4 text-[13px] focus:outline-none" onKeyDown={(e) => e.key === "Enter" && doAuth()} />
         </div>
         {authErr && <div className="mt-3 p-2.5 rounded-[10px] bg-[#2A1515] border border-red-900 text-[12px] text-red-400">{authErr}</div>}
+        {!backendUp && (
+          <div className="mt-3 p-2.5 rounded-[10px] bg-[#2A1F15] border border-[#4A3520] text-[12px] text-[#FFB86A]">
+            {t(lang, "backend_off")} <code>cd backend && npm start</code>
+          </div>
+        )}
         <button onClick={doAuth} disabled={authBusy}
           className="mt-4 w-full h-11 rounded-full bg-[#1877F2] text-[14px] font-medium hover:bg-[#166FE5] disabled:opacity-50">
           {authBusy ? "..." : authMode === "login" ? t(lang, "auth_login") : t(lang, "auth_signup")}
@@ -604,6 +610,11 @@ export default function Dashboard() {
       </button>
     </div>
   );
+
+  /* ================= GATE: login ke baghair kuch nahi ================= */
+  // Yahan early return hai taake bina login sidebar/header/dashboard bilkul render na ho.
+  // AuthScreen khud min-h-screen centered hai.
+  if (authChecked && !user) return AuthScreen;
 
   return (
     <div className="min-h-screen t-bg t-text flex antialiased" style={{ fontFamily: "Inter,system-ui" }}>
@@ -794,8 +805,6 @@ export default function Dashboard() {
 
           {!authChecked || loading || (user && !booted) ? (
             <div className="t-m2 text-[14px]">{t(lang, "loading")}</div>
-          ) : !user ? (
-            <>{AuthScreen}</>
           ) : !connected || pages.length === 0 ? (
             <>{ConnectCard}</>
           ) : (
