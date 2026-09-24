@@ -140,6 +140,7 @@ export default function Dashboard() {
   const [overview, setOverview] = useState<any>(null);
   const [gviral, setGviral] = useState<any>(null);
   const [gloading, setGloading] = useState(false);
+  const [syncedAt, setSyncedAt] = useState("");
   const [hist, setHist] = useState<any>(null);
   const [hrange, setHrange] = useState(28);
   const sel = selId === "GLOBAL"
@@ -185,11 +186,13 @@ export default function Dashboard() {
       setBackendUp(true); setConnected(h.connected);
       if (!h.connected) { setPages([]); return; }
       const b = await api.businesses();
+      if (b.synced_at) setSyncedAt(b.synced_at);
       const all = (b.businesses || []).flatMap((x: any) => x.pages || []);
       // fallback: direct pages endpoint (can_post flag ke sath)
       let list = all;
       try {
         const pg = await api.pages();
+        if (pg.synced_at) setSyncedAt(pg.synced_at);
         if ((pg.pages || []).length >= list.length) list = pg.pages;
       } catch (e: any) {
         if (e?.data?.need_login) return; // login nahi — backend off nahi
@@ -356,7 +359,10 @@ export default function Dashboard() {
       setConnToken("");
       say(`Connected ✓ ${r.me?.name || ""} — ${r.pages} pages (${r.with_access ?? 0} posting access)${(r.notes || []).length ? " • " + r.notes.join("; ") : ""}`);
       await refreshPages();
-    } catch (e: any) { say(e.message || "Connect failed"); }
+    } catch (e: any) {
+      const d = e?.data?.detail || {};
+      say(d.error_user_msg || d.message || e.message || "Connect failed");
+    }
     setConnecting(false);
   };
   const doSync = async () => {
@@ -794,6 +800,7 @@ export default function Dashboard() {
             <p className="text-[14px] t-m2 mt-1">
               {tab === "pages" ? t(lang, "sub_pages")
                 : sel ? `${sel.name} • ${sel.category || ""}` : t(lang, "sub_real")}
+              {syncedAt ? <span className="t-m3"> • {t(lang, "data_synced")}: {new Date(syncedAt.replace(" ", "T") + "Z").toLocaleString()}</span> : null}
             </p>
           </div>
 

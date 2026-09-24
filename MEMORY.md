@@ -12,7 +12,7 @@
 - GitHub: https://github.com/ShahzaibRao/Page-Manager-Pro.git — main (v0.1, v0.2) + **dev** active. Secrets gitignored; zero tokens staged (sirf `EAAB...` docs placeholders).
 - Demo live: https://shahzaibrao.github.io/Page-Manager-Pro/ (`docs/`, workflow deploy). About + homepage set.
 - Stack: backend Express :4000 (node:sqlite `data.db`, node-cron Asia/Karachi) + frontend Next.js 14 :3000. Run: `start-all.bat`.
-- Mode: LIVE. System User token `.env` me. Sync: "Followers Page BM" → **~2797 pages**, **~19 posting access**.
+- Mode: MULTI-USER. `.env` token REMOVED (24 Sep) — har user apna token Connect screen se lagata hai (vault). Purane users ke vault tokens intact. Sync: "Followers Page BM" → **~2797 pages**, **~19 posting access** (owner data).
 - Pages tab: Posting Access/All filter + search + **followers sorting** (default high→low) + **pagination 200/page with numbered nav**.
 - Selected page + lang + theme **localStorage persisted** (restore post-mount only — hydration fix).
 - Global: `/api/overview` + `/api/viral-global`. Dashboard/Insights/Viral me global branches.

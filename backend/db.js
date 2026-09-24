@@ -108,4 +108,42 @@ for (const [table, col] of [
   try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col}`); } catch {}
 }
 
+// v2 migration: per-user row identity (shared BM pe do users ki rows overwrite na hon).
+// pages.id = userId:pg_fbid, businesses.id = userId:bizid. fb unique constraint khatam.
+try {
+  const ver = db.prepare('PRAGMA user_version').get().user_version || 0;
+  if (ver < 2) {
+    // posts/watchers ke page refs naye ids pe remap (purani pages table se)
+    db.exec(`UPDATE posts SET page_id = (
+      SELECT CASE WHEN p.user_id IS NULL THEN p.id ELSE p.user_id || ':pg_' || p.fb_page_id END
+      FROM pages p WHERE p.id = posts.page_id
+    ) WHERE EXISTS (SELECT 1 FROM pages p WHERE p.id = posts.page_id)`);
+    db.exec(`UPDATE watchers SET page_id = (
+      SELECT CASE WHEN p.user_id IS NULL THEN p.id ELSE p.user_id || ':pg_' || p.fb_page_id END
+      FROM pages p WHERE p.id = watchers.page_id
+    ) WHERE EXISTS (SELECT 1 FROM pages p WHERE p.id = watchers.page_id)`);
+    db.exec(`UPDATE instant_watchers SET page_id = (
+      SELECT CASE WHEN p.user_id IS NULL THEN p.id ELSE p.user_id || ':pg_' || p.fb_page_id END
+      FROM pages p WHERE p.id = instant_watchers.page_id
+    ) WHERE EXISTS (SELECT 1 FROM pages p WHERE p.id = instant_watchers.page_id)`);
+    db.exec(`CREATE TABLE pages_new (id TEXT PRIMARY KEY, fb_page_id TEXT NOT NULL, name TEXT NOT NULL,
+      category TEXT DEFAULT '', business_id TEXT, followers_count INTEGER DEFAULT 0, is_published INTEGER DEFAULT 1,
+      verification_status TEXT DEFAULT '', link TEXT DEFAULT '', picture_url TEXT DEFAULT '',
+      page_token TEXT DEFAULT '', can_post INTEGER DEFAULT 0, user_id INTEGER)`);
+    db.exec(`INSERT INTO pages_new SELECT
+      CASE WHEN user_id IS NULL THEN id ELSE user_id || ':pg_' || fb_page_id END,
+      fb_page_id, name, category, business_id, followers_count, is_published,
+      verification_status, link, picture_url, page_token, can_post, user_id FROM pages`);
+    db.exec('DROP TABLE pages');
+    db.exec('ALTER TABLE pages_new RENAME TO pages');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_pages_user_fb ON pages(user_id, fb_page_id)');
+    db.exec(`CREATE TABLE businesses_new (id TEXT PRIMARY KEY, name TEXT NOT NULL, user_id INTEGER)`);
+    db.exec(`INSERT INTO businesses_new SELECT
+      CASE WHEN user_id IS NULL THEN id ELSE user_id || ':' || id END, name, user_id FROM businesses`);
+    db.exec('DROP TABLE businesses');
+    db.exec('ALTER TABLE businesses_new RENAME TO businesses');
+    db.exec('PRAGMA user_version = 2');
+  }
+} catch (e) { console.log('migration v2 note:', e.message); }
+
 module.exports = db;

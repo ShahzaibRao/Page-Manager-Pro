@@ -43,7 +43,7 @@ async function cached(key, ttlMs, fn) {
 const clearCache = () => __cache.clear();
 const row = (pageId, uid) => uid === undefined
   ? db.prepare('SELECT * FROM pages WHERE id=? OR fb_page_id=?').get(pageId, pageId)
-  : db.prepare('SELECT * FROM pages WHERE (id=? OR fb_page_id=?) AND user_id=?').get(pageId, pageId, uid);
+  : db.prepare('SELECT * FROM pages WHERE (id=? AND user_id=?) OR (fb_page_id=? AND user_id=?)').get(pageId, uid, pageId, uid);
 // current user ka FB token (vault) — legacy: koi user nahi to .env
 const utoken = (req) => (req.user ? auth.getUserToken(req.user.id) : (process.env.FB_SYSTEM_USER_TOKEN || ''));
 const needToken = (req, res) => {
@@ -58,7 +58,8 @@ const notConn = (res) => res.status(409).json({ not_connected: true, error: 'Sys
 // ---------- Health ----------
 app.get('/api/health', (req, res) => res.json({
   ok: true, time: new Date().toISOString(), tz: process.env.TIMEZONE || 'Asia/Karachi',
-  connected: fb.isConnected() || !!(req.user && utoken(req)),
+  // per-user truth: env token doosre users ko "connected" nahi dikhayega
+  connected: req.user ? !!utoken(req) : fb.isConnected(),
 }));
 
 // ---------- Auth (email + Google) ----------
@@ -211,7 +212,9 @@ async function syncFromFB(token, userId, userBiz) {
     } catch (e) { notes.push('fixed Business ID read fail'); }
   }
   for (const b of businesses) {
-    if (userId) db.prepare('INSERT OR REPLACE INTO businesses (id,name,user_id) VALUES (?,?,?)').run(b.id, b.name, userId);
+    // per-user row id taake shared BM pe doosre user ki row overwrite na ho
+    const bizRowId = userId ? `${userId}:${b.id}` : b.id;
+    if (userId) db.prepare('INSERT OR REPLACE INTO businesses (id,name,user_id) VALUES (?,?,?)').run(bizRowId, b.name, userId);
     else db.prepare('INSERT OR REPLACE INTO businesses (id,name) VALUES (?,?)').run(b.id, b.name);
     try {
       for (const p of await fb.getBusinessPages(b.id, t)) {
@@ -236,7 +239,7 @@ async function syncFromFB(token, userId, userBiz) {
   } catch (e) { notes.push('/me/accounts fail (pages_show_list permission chahiye): ' + JSON.stringify(fb.fbErr(e)).slice(0, 150)); }
 
   if (!businesses.length && seen.size) {
-    if (userId) db.prepare("INSERT OR REPLACE INTO businesses (id,name,user_id) VALUES ('direct','Direct Pages (no Business edge)',?)").run(userId);
+    if (userId) db.prepare("INSERT OR REPLACE INTO businesses (id,name,user_id) VALUES (?,?,?)").run(`${userId}:direct`, 'Direct Pages (no Business edge)', userId);
     else db.prepare("INSERT OR REPLACE INTO businesses (id,name) VALUES ('direct','Direct Pages (no Business edge)')").run();
   }
 
@@ -260,7 +263,7 @@ async function syncFromFB(token, userId, userBiz) {
       if (old && old.page_token) tok = old.page_token;
     }
     putPage.run(
-      'pg_' + p.id, p.id, p.name, p.category || '', p.business_id || 'direct',
+      (userId ? `${userId}:pg_` : 'pg_') + p.id, p.id, p.name, p.category || '', p.business_id || 'direct',
       p.followers_count || 0, p.is_published ? 1 : 0, p.verification_status || '',
       p.link || '', pic, tok, tok ? 1 : 0, ...(userId ? [userId] : [])
     );
@@ -300,6 +303,14 @@ async function syncFromFB(token, userId, userBiz) {
 
 // page_token KABHI frontend ko nahi jata (server-side only)
 const PUB_COLS = 'id,fb_page_id,name,category,business_id,followers_count,is_published,verification_status,link,picture_url,can_post';
+const lastSyncAt = (uid) => {
+  try {
+    const r = uid === undefined
+      ? db.prepare("SELECT created_at FROM logs WHERE action IN ('synced','connected') ORDER BY id DESC LIMIT 1").get()
+      : db.prepare("SELECT created_at FROM logs WHERE action IN ('synced','connected') AND (user_id=? OR user_id IS NULL) ORDER BY id DESC LIMIT 1").get(uid);
+    return (r && r.created_at) || '';
+  } catch { return ''; }
+};
 
 app.get('/api/businesses', (req, res) => {
   const uid = req.user.id;
@@ -308,15 +319,15 @@ app.get('/api/businesses', (req, res) => {
     pages: db.prepare(`SELECT ${PUB_COLS} FROM pages WHERE business_id=? AND user_id=?`).all(b.id, uid),
     status: utoken(req) ? 'Connected (Live)' : 'Not Connected',
   }));
-  res.json({ connected: !!utoken(req), businesses });
+  res.json({ connected: !!utoken(req), businesses, synced_at: lastSyncAt(req.user.id) });
 });
 app.get('/api/pages', (req, res) => {
   const uid = req.user.id;
   if (!utoken(req) && db.prepare('SELECT COUNT(*) c FROM pages WHERE user_id=?').get(uid).c === 0) return notConn(res);
   if (req.query.posting === '1') {
-    return res.json({ pages: db.prepare(`SELECT ${PUB_COLS} FROM pages WHERE can_post=1 AND user_id=? ORDER BY name`).all(uid) });
+    return res.json({ pages: db.prepare(`SELECT ${PUB_COLS} FROM pages WHERE can_post=1 AND user_id=? ORDER BY name`).all(uid), synced_at: lastSyncAt(uid) });
   }
-  res.json({ pages: db.prepare(`SELECT ${PUB_COLS} FROM pages WHERE user_id=? ORDER BY name`).all(uid) });
+  res.json({ pages: db.prepare(`SELECT ${PUB_COLS} FROM pages WHERE user_id=? ORDER BY name`).all(uid), synced_at: lastSyncAt(uid) });
 });
 app.get('/api/pages/:id', (req, res) => {
   const p = db.prepare(`SELECT ${PUB_COLS} FROM pages WHERE (id=? OR fb_page_id=?) AND user_id=?`).get(req.params.id, req.params.id, req.user.id);
@@ -615,14 +626,14 @@ app.get('/api/fb/:pageId/top-posts', async (req, res) => {
 app.get('/api/overview', async (req, res) => {
   if (!utoken(req)) return notConn(res);
   const days = [7, 28, 90].includes(+req.query.range) ? +req.query.range : 28;
-  const pages = db.prepare('SELECT * FROM pages WHERE can_post=1').all();
+  const pages = db.prepare('SELECT * FROM pages WHERE can_post=1 AND user_id=?').all(req.user.id);
   const empty = { mode: 'LIVE', range_days: days, pages: 0,
     metric_labels: { reach: 'Page Views', engagement: 'Post Engagements' },
     kpis: { followers: 0, reach: 0, engagement: 0, video_views_3s: 0 },
     series: { labels: [], reach: [], engagement: [] }, per_page: [] };
   if (!pages.length) return res.json(empty);
 
-  const per = await cached(`overview:${days}`, 5 * 60 * 1000, () =>
+  const per = await cached(`overview:${req.user.id}:${days}`, 5 * 60 * 1000, () =>
     Promise.all(pages.map(async (pg) => {
       const pt = pg.page_token || undefined;
       // page info + insights parallel
@@ -673,8 +684,8 @@ app.get('/api/overview', async (req, res) => {
 app.get('/api/viral-global', async (req, res) => {
   if (!utoken(req)) return notConn(res);
   const limit = Math.min(25, +req.query.limit || 10);
-  const pages = db.prepare('SELECT * FROM pages WHERE can_post=1').all();
-  const { all, failed } = await cached(`viral:${limit}`, 3 * 60 * 1000, async () => {
+  const pages = db.prepare('SELECT * FROM pages WHERE can_post=1 AND user_id=?').all(req.user.id);
+  const { all, failed } = await cached(`viral:${req.user.id}:${limit}`, 3 * 60 * 1000, async () => {
     const all = [];
     const failed = [];
   await Promise.all(pages.map(async (pg) => {
