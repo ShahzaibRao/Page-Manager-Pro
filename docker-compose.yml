@@ -59,7 +59,6 @@ services:
       HOSTNAME: 0.0.0.0
       # Server-side proxy target (browser ko iski khabar nahi — koi IP bake nahi hota)
       BACKEND_INTERNAL_URL: http://backend:4000
-      BACKEND_INTERNAL_URL: http://backend:4000
     ports:
       - "3000:3000"
     depends_on:
