@@ -669,7 +669,11 @@ async function processWatcher(w) {
 app.get('/api/watchers', (req, res) => {
   const list = db.prepare('SELECT * FROM watchers ORDER BY id DESC').all().map((w) => {
     const page = db.prepare('SELECT id, name FROM pages WHERE id=?').get(w.page_id);
-    return { ...w, page_name: page ? page.name : '(page missing)', files: listMediaFiles(w.folder_path).length };
+    const files = listMediaFiles(w.folder_path).length;
+    const per = Math.max(1, w.per_run || 1);
+    // stock levels: <30 add-more, <20 monitoring, <11 critical
+    const stock = files < 11 ? 'critical' : files < 20 ? 'watch' : files < 30 ? 'low' : 'ok';
+    return { ...w, page_name: page ? page.name : '(page missing)', files, days_left: Math.floor(files / per), stock };
   });
   res.json({ watchers: list });
 });
@@ -687,7 +691,9 @@ app.post('/api/watchers', (req, res) => {
   );
   const w = db.prepare('SELECT * FROM watchers WHERE id=?').get(st.lastInsertRowid);
   log('watcher_created', `#${w.id} ${w.name} → ${page.name} @ ${daily_time} (${listMediaFiles(folder_path).length} files)`);
-  res.json({ watcher: { ...w, files: listMediaFiles(folder_path).length } });
+  const fc = listMediaFiles(folder_path).length;
+  const stockOf = fc < 11 ? 'critical' : fc < 20 ? 'watch' : fc < 30 ? 'low' : 'ok';
+  res.json({ watcher: { ...w, files: fc, days_left: Math.floor(fc / Math.max(1, w.per_run || 1)), stock: stockOf } });
 });
 app.put('/api/watchers/:id', (req, res) => {
   const w = db.prepare('SELECT * FROM watchers WHERE id=?').get(req.params.id);

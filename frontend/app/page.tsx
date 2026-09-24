@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Area,
 } from "recharts";
@@ -66,12 +66,20 @@ const Empty = ({ title, sub, action }: any) => (
 );
 
 export default function Dashboard() {
-  const [lang, setLang] = useState<Lang>(() => {
-    try { return (localStorage.getItem("pmp_lang") as Lang) || "ur"; } catch { return "ur"; }
-  });
-  const [theme, setTheme] = useState<Theme>(() => {
-    try { return (localStorage.getItem("pmp_theme") as Theme) || "dark"; } catch { return "dark"; }
-  });
+  // NOTE: localStorage sirf mount ke baad parho — warna server/client HTML mismatch (hydration error)
+  const [lang, setLang] = useState<Lang>("ur");
+  const [theme, setTheme] = useState<Theme>("dark");
+  const [selId, setSelId] = useState("");
+  useEffect(() => {
+    try {
+      const s = localStorage.getItem("pmp_page");
+      if (s) setSelId(s);
+      const l = localStorage.getItem("pmp_lang") as Lang;
+      if (l) setLang(l);
+      const th = localStorage.getItem("pmp_theme") as Theme;
+      if (th) setTheme(th);
+    } catch {}
+  }, []);
   useEffect(() => {
     try { localStorage.setItem("pmp_lang", lang); } catch {}
     document.documentElement.lang = lang;
@@ -85,9 +93,6 @@ export default function Dashboard() {
   const [backendUp, setBackendUp] = useState(false);
   const [connected, setConnected] = useState(false);
   const [pages, setPages] = useState<any[]>([]);
-  const [selId, setSelId] = useState(() => {
-    try { return localStorage.getItem("pmp_page") || ""; } catch { return ""; }
-  });
   useEffect(() => {
     try { localStorage.setItem("pmp_page", selId || ""); } catch {}
   }, [selId]);
@@ -337,7 +342,35 @@ export default function Dashboard() {
     catch (e: any) { say(e.message); }
   };
 
-  // ---- instant watchers ----
+  // ---- stock alerts (auto-folder low files) ----
+  const [alerts, setAlerts] = useState<any[]>([]);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const notifiedRef = useRef<Set<number>>(new Set());
+  const stockMeta = (s: string) => s === "critical"
+    ? { label: t(lang, "notif_critical"), color: "#FF6B6B" }
+    : s === "watch"
+    ? { label: t(lang, "notif_watch"), color: "#FFB86A" }
+    : { label: t(lang, "notif_low"), color: "#FFD166" };
+  const loadAlerts = async () => {
+    try {
+      const w = await api.watchers();
+      const low = (w.watchers || []).filter((x: any) => x.stock && x.stock !== "ok");
+      setAlerts(low);
+      for (const x of low) {
+        if (x.stock === "critical" && !notifiedRef.current.has(x.id)) {
+          notifiedRef.current.add(x.id);
+          say(`🔴 ${x.name}: ${x.files} files (${x.days_left} ${t(lang, "days_unit")}) — ${t(lang, "notif_critical")}`);
+        }
+      }
+    } catch {}
+  };
+  useEffect(() => {
+    if (!backendUp) return;
+    loadAlerts();
+    const iv = setInterval(loadAlerts, 60000);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backendUp, lang]);
   const loadInstant = async () => {
     try { const w = await api.instant(); setIwatches(w.watchers || []); } catch {}
   };
@@ -561,7 +594,38 @@ export default function Dashboard() {
             {connected && (
               <button onClick={doSync} title="Re-sync from Facebook" className="h-9 px-3 rounded-full t-card border t-line flex items-center gap-1.5 text-[12px] t-m1 t-texth">{Ic.refresh("w-3.5 h-3.5")} Sync</button>
             )}
-            <button className="w-9 h-9 rounded-full t-card border t-line flex items-center justify-center t-m1 t-texth">{Ic.bell("w-4 h-4")}</button>
+            <div className="relative">
+              <button onClick={() => setNotifOpen(!notifOpen)} title={t(lang, "notif_title")}
+                className="w-9 h-9 rounded-full t-card border t-line flex items-center justify-center t-m1 t-texth relative">
+                {Ic.bell("w-4 h-4")}
+                {alerts.length > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">{alerts.length}</span>
+                )}
+              </button>
+              {notifOpen && (
+                <div className="absolute right-0 mt-2 w-[320px] rounded-[16px] t-card border t-line3 shadow-[0_20px_60px_rgba(0,0,0,0.6)] overflow-hidden z-50">
+                  <div className="p-3 text-[11px] font-semibold tracking-widest t-m3 uppercase">{t(lang, "notif_title")} • {alerts.length}</div>
+                  <div className="max-h-[320px] overflow-auto">
+                    {alerts.length === 0 && <div className="px-4 py-5 text-[13px] t-m2">{t(lang, "notif_empty")}</div>}
+                    {alerts.map((a) => {
+                      const m = stockMeta(a.stock);
+                      return (
+                        <button key={a.id} onClick={() => { setNotifOpen(false); setTab("folders"); }}
+                          className="w-full flex items-center gap-3 px-4 py-3 t-hover text-left">
+                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: m.color }} />
+                          <span className="flex-1 min-w-0">
+                            <span className="text-[13px] font-medium block truncate">{a.name}</span>
+                            <span className="text-[11px] t-m2 block">{a.files} files • {a.days_left} {t(lang, "days_unit")} • <b style={{ color: m.color }}>{m.label}</b></span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button onClick={() => { setNotifOpen(false); setTab("folders"); }}
+                    className="w-full py-2.5 text-[12px] t-m1 border-t t-line t-hover">{t(lang, "notif_view")} →</button>
+                </div>
+              )}
+            </div>
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#8B5CF6] to-[#1877F2] flex items-center justify-center text-[12px] font-bold">SR</div>
           </div>
         </header>
@@ -980,6 +1044,13 @@ export default function Dashboard() {
                         <div className="font-medium text-[14px]">{w.name} <span className={`ml-1 text-[10px] px-2 py-0.5 rounded-full ${w.status === "active" ? "bg-[#132E1F] text-[#3DD598]" : "t-panel t-m2"}`}>{w.status}</span></div>
                         <div className="text-[12px] t-m2 mt-0.5 truncate">{w.folder_path}</div>
                         <div className="text-[12px] t-m2">→ {w.page_name} • {t(lang, "f_daily")} {w.daily_time} • {w.post_as === "reel" ? t(lang, "reel") : t(lang, "video_post")} • {w.per_run}/{t(lang, "f_daily")} • {w.files} {t(lang, "f_files")} • {t(lang, "f_last")}: {w.last_run || "—"}</div>
+                        {w.stock && w.stock !== "ok" && (() => { const m = stockMeta(w.stock); return (
+                          <div className="text-[12px] mt-1 flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: m.color }} />
+                            <b style={{ color: m.color }}>{m.label}</b>
+                            <span className="t-m2">• {w.files} files = {w.days_left} {t(lang, "days_unit")}</span>
+                          </div>
+                        ); })()}
                       </div>
                       <div className="flex gap-2">
                         <button onClick={() => runWatcherNow(w.id)} className="h-8 px-3 rounded-full t-panel border t-line3 text-[12px]">{t(lang, "f_run")}</button>
