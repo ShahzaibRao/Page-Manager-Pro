@@ -21,18 +21,16 @@ FRONTEND_URL=http://92.5.169.113:3000
 > `.env` gitignored hai — clone me nahi ata, har server pe khud banana hota hai.
 > Isi liye "not connected" araha tha: token hi nahi tha.
 
-## 2. Frontend ko backend ka address batana (LAZMI)
-
-Browser `localhost:4000` ko **apna laptop** samajhta hai, server nahi. Is liye
-frontend image server ke IP ke sath build karo:
+## 2. Bas up karo — koi IP configure nahi karna
 
 ```bash
 cd /home/ubuntu/Page-Manager-Pro
-NEXT_PUBLIC_API_URL=http://92.5.169.113:4000 FRONTEND_URL=http://92.5.169.113:3000 docker compose up --build -d
+docker compose up --build -d
 ```
 
-> `NEXT_PUBLIC_API_URL` build-time pe bundle me bake hota hai — IP badle to
-> frontend **dobara build** karna hoga (`--build`).
+> Browser relative `/api` mangta hai, Next.js server-side backend (`backend:4000`)
+> pe proxy karta hai. **IP change/ephemeral IP se koi farq nahi parta — dobara
+> build nahi karna.** Sirf `backend/.env` me token lazmi hai (Step 1).
 
 ## 3. Firewall kholna (2 jagah)
 
@@ -62,7 +60,7 @@ paste karein (ya `.env` me pehle se ho to sidha Sync).
 ```bash
 cd /home/ubuntu/Page-Manager-Pro
 git pull origin staging   # ya main, jo branch use ho
-NEXT_PUBLIC_API_URL=http://92.5.169.113:4000 docker compose up --build -d
+docker compose up --build -d
 ```
 
 ## Masle

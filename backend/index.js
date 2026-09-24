@@ -9,7 +9,16 @@ const fb = require('./fb');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
-app.use(cors({ origin: (process.env.FRONTEND_URL || 'http://localhost:3000').split(',') }));
+// CORS: FRONTEND_URL set ho to strict allowlist (comma-separated), warna request Origin reflect.
+// (Same-origin proxy ke baad browser origin hamesha frontend ka apna host hota hai,
+//  is liye IP change pe .env chherna nahi parta. Auth phase me strict allowlist hogi.)
+const ALLOWED = (process.env.FRONTEND_URL || '').split(',').map((s) => s.trim()).filter(Boolean);
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin || !ALLOWED.length || ALLOWED.includes(origin)) return cb(null, true);
+    cb(new Error('CORS blocked: ' + origin));
+  },
+}));
 app.use(express.json({ limit: '50mb' }));
 
 const log = (action, detail = '') => {

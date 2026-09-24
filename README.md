@@ -74,7 +74,9 @@ docker compose down        # stop (data volumes me mehfooz rehta hai)
 ```
 
 > Backend data (`data.db` + uploads) `backenddata` volume me persist hota hai.
-> Oracle/server pe yehi file chalegi — sirf `backend/.env` me asal token + strong `POSTGRES_PASSWORD`, aur build me `NEXT_PUBLIC_API_URL=http://SERVER-IP:4000` set karna hai.
+> **Koi IP configure nahi karna:** browser relative `/api` mangta hai, Next.js server-side
+> backend pe proxy karta hai — server IP change ho to **rebuild ki zaroorat nahi**.
+> Oracle/server pe yehi file chalegi — sirf `backend/.env` me asal token + strong `POSTGRES_PASSWORD`.
 
 ### Alternative: bina Docker (npm, quick dev)
 

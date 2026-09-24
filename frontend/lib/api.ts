@@ -1,4 +1,7 @@
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+// Default RELATIVE (same-origin): Next.js /api/* ko backend pe proxy karta hai.
+// Is liye browser ko backend ka IP/host pata hona ZARURI NAHI — IP change pe rebuild nahi chahiye.
+// (Purana tareeqa: NEXT_PUBLIC_API_URL set karna — ab optional fallback hai.)
+const API = process.env.NEXT_PUBLIC_API_URL || "";
 
 async function req(path: string, opts: RequestInit = {}) {
   const r = await fetch(`${API}${path}`, {
