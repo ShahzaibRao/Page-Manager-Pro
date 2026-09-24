@@ -2,6 +2,7 @@
 
 > Har session me ye file parho, kaam ke baad update karo. Secrets kabhi yahan nahi likhne.
 > **Branch rule: saara kaam `dev` branch me hoga, `main` me nahi. Stable hone pe `main` me merge + tag.**
+> Branches: `main` (releases v0.1/v0.2) • `dev` (active work) • `staging` (pre-release mirror of dev).
 
 ## State (24 Sep 2026)
 - GitHub: https://github.com/ShahzaibRao/Page-Manager-Pro.git — main (v0.1, v0.2) + **dev** active. Secrets gitignored; zero tokens staged (sirf `EAAB...` docs placeholders).
