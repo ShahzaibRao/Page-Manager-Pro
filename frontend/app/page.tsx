@@ -192,24 +192,46 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!sel || sel.id === "GLOBAL") return;
+    // core: dashboard ke liye (chart, KPIs, monet mini, queue badge)
     (async () => {
       try {
-        const [ins, hh, mo, vi, q] = await Promise.all([
+        const [ins, mo, q] = await Promise.all([
           api.insights(sel.id, range).catch((e) => e.data || { error: true }),
-          api.pageHealth(sel.id).catch((e) => e.data || { error: true }),
           api.monetization(sel.id).catch((e) => e.data || { error: true }),
-          api.topPosts(sel.id, viralSort).catch((e) => e.data || { error: true }),
           api.scheduled(sel.id).catch(() => ({ local: [], remote: [] })),
         ]);
         setInsights(ins.error ? null : ins);
-        setHealth(hh.error ? null : hh);
         setMonet(mo.error ? null : mo);
-        setViral(vi.error ? null : vi);
         setQueue(q);
       } catch {}
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selId, range, viralSort]);
+  }, [selId, range]);
+
+  // lazy: top posts SIRF viral tab khulne pe (sab se slow call)
+  useEffect(() => {
+    if (!sel || sel.id === "GLOBAL" || tab !== "viral") return;
+    setViral(null);
+    (async () => {
+      try {
+        const vi = await api.topPosts(sel.id, viralSort).catch((e) => e.data || { error: true });
+        setViral(vi.error ? null : vi);
+      } catch {}
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selId, viralSort, tab]);
+
+  // lazy: page health SIRF settings tab pe
+  useEffect(() => {
+    if (!sel || sel.id === "GLOBAL" || tab !== "settings") return;
+    (async () => {
+      try {
+        const hh = await api.pageHealth(sel.id).catch((e) => e.data || { error: true });
+        setHealth(hh.error ? null : hh);
+      } catch {}
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selId, tab]);
 
   // global data (sab posting-access pages)
   useEffect(() => {
@@ -1229,7 +1251,9 @@ export default function Dashboard() {
                   </div>
                 )
               ) : (
-                !viral || !viral.posts?.length ? (
+                !viral ? (
+                  <div className="t-m2 text-[14px]">{t(lang, "loading")}</div>
+                ) : !viral.posts?.length ? (
                   <Empty title={t(lang, "no_posts")} sub={t(lang, "no_posts_sub")}
                     action={<button onClick={doSync} className="mt-4 h-9 px-5 rounded-full bg-[#1877F2] text-[13px] font-medium">{t(lang, "resync")}</button>} />
                 ) : (

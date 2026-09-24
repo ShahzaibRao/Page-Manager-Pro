@@ -15,6 +15,17 @@ app.use(express.json({ limit: '50mb' }));
 const log = (action, detail = '') => {
   try { db.prepare('INSERT INTO logs (action, detail) VALUES (?,?)').run(action, detail); } catch {}
 };
+// tiny TTL cache — repeated tab switches / reloads FB ko dobara hit nahi karte
+const __cache = new Map();
+async function cached(key, ttlMs, fn) {
+  const hit = __cache.get(key);
+  if (hit && Date.now() - hit.t < ttlMs) return hit.v;
+  const v = await fn();
+  __cache.set(key, { t: Date.now(), v });
+  if (__cache.size > 200) for (const k of [...__cache.keys()].slice(0, 50)) __cache.delete(k);
+  return v;
+}
+const clearCache = () => __cache.clear();
 const row = (pageId) => db.prepare('SELECT * FROM pages WHERE id=? OR fb_page_id=?').get(pageId, pageId);
 const notConn = (res) => res.status(409).json({ not_connected: true, error: 'System User Token connect nahi hai. Settings > Connect Business Manager me token lagayein.' });
 
@@ -73,6 +84,7 @@ app.post('/api/sync', async (req, res) => {
   if (!fb.isConnected()) return notConn(res);
   try {
     const result = await syncWithRetry();
+    clearCache(); // fresh sync → purana cached data invalid
     log('synced', `${result.pages} pages synced`);
     res.json({ ok: true, ...result });
   } catch (e) {
@@ -376,7 +388,7 @@ app.get('/api/fb/:pageId/health', async (req, res) => {
   if (!page) return res.status(404).json({ error: 'Page not found' });
   if (!fb.isConnected()) return notConn(res);
   try {
-    const info = await fb.getPageInfo(page.fb_page_id, page.page_token || undefined);
+    const info = await cached(`health:${page.id}`, 10 * 60 * 1000, () => fb.getPageInfo(page.fb_page_id, page.page_token || undefined));
     db.prepare('UPDATE pages SET followers_count=?, is_published=?, verification_status=? WHERE id=?')
       .run(info.followers_count || 0, info.is_published ? 1 : 0, info.verification_status || '', page.id);
     res.json({ mode: 'LIVE', page_status: info });
@@ -400,15 +412,21 @@ app.get('/api/fb/:pageId/insights', async (req, res) => {
   if (!fb.isConnected()) return notConn(res);
   const days = [7, 28, 90].includes(+req.query.range) ? +req.query.range : 28;
   try {
-    const pt = page.page_token || undefined;
-    // real followers (Page field — insights metric deprecated hai)
-    let followers = page.followers_count || 0;
-    try {
-      const info = await fb.getPageInfo(page.fb_page_id, pt);
-      followers = info.followers_count ?? info.fan_count ?? followers;
-      db.prepare('UPDATE pages SET followers_count=? WHERE id=?').run(followers, page.id);
-    } catch {}
-    const series = await fb.getPageInsights(page.fb_page_id, days, pt);
+    const data = await cached(`insights:${page.id}:${days}`, 5 * 60 * 1000, async () => {
+      const pt = page.page_token || undefined;
+      // followers + series parallel (pehle sequential thay)
+      const [info, series] = await Promise.all([
+        fb.getPageInfo(page.fb_page_id, pt).catch(() => null),
+        fb.getPageInsights(page.fb_page_id, days, pt),
+      ]);
+      let followers = page.followers_count || 0;
+      if (info) {
+        followers = info.followers_count ?? info.fan_count ?? followers;
+        try { db.prepare('UPDATE pages SET followers_count=? WHERE id=?').run(followers, page.id); } catch {}
+      }
+      return { followers, series };
+    });
+    const { followers, series } = data;
     const byDate = {};
     const push = (arr, key) => {
       if (!Array.isArray(arr)) return;
@@ -451,31 +469,34 @@ app.get('/api/fb/:pageId/top-posts', async (req, res) => {
   if (!fb.isConnected()) return notConn(res);
   const sort = req.query.sort === 'engagement' ? 'engagement' : 'reach';
   try {
-    const raw = await fb.getPagePosts(page.fb_page_id, 25, page.page_token || undefined);
-    let reachAvailable = false;
-    const posts = [];
-    for (const p of raw) {
-      const likes = (p.likes && p.likes.summary && p.likes.summary.total_count) || 0;
-      const comments = (p.comments && p.comments.summary && p.comments.summary.total_count) || 0;
-      const shares = (p.shares && p.shares.count) || 0;
-      const pr = await fb.getPostReach(p.id, page.page_token || undefined);
-      const reach = pr ? pr.reach : 0;
-      if (pr && pr.reach > 0) reachAvailable = true;
-      const eng = (pr && pr.eng ? pr.eng : 0) || (likes + comments + shares);
-      posts.push({
-        fb_post_id: p.id, message: p.message || '', type: p.type || 'post',
-        created_time: p.created_time, picture: p.full_picture || '', permalink: p.permalink_url || '',
-        reach, likes, comments, shares, engagement: eng,
-        rate: reach ? +(eng / reach).toFixed(3) : 0,
-      });
-    }
-    const avg = posts.length && reachAvailable ? posts.reduce((a, b) => a + b.reach, 0) / posts.length : 0;
-    const out = posts.map((p) => ({ ...p, viral: reachAvailable && avg > 0 && p.reach > avg * 2.5 }));
-    out.sort((a, b) => sort === 'engagement' ? b.rate - a.rate : b.reach - a.reach);
+    const out = await cached(`top:${page.id}:${sort}`, 3 * 60 * 1000, async () => {
+      const raw = await fb.getPagePosts(page.fb_page_id, 25, page.page_token || undefined);
+      // per-post reach PARALLEL (pehle sequential loop tha — sab se bara bottleneck)
+      const lim = fb.pLimit(6);
+      const posts = await Promise.all(raw.map((p) => lim(async () => {
+        const likes = (p.likes && p.likes.summary && p.likes.summary.total_count) || 0;
+        const comments = (p.comments && p.comments.summary && p.comments.summary.total_count) || 0;
+        const shares = (p.shares && p.shares.count) || 0;
+        const pr = await fb.getPostReach(p.id, page.page_token || undefined);
+        const reach = pr ? pr.reach : 0;
+        const eng = (pr && pr.eng ? pr.eng : 0) || (likes + comments + shares);
+        return {
+          fb_post_id: p.id, message: p.message || '', type: p.type || 'post',
+          created_time: p.created_time, picture: p.full_picture || '', permalink: p.permalink_url || '',
+          reach, likes, comments, shares, engagement: eng,
+          rate: reach ? +(eng / reach).toFixed(3) : 0, _hasReach: !!(pr && pr.reach > 0),
+        };
+      })));
+      const reachAvailable = posts.some((p) => p._hasReach);
+      const avg = posts.length && reachAvailable ? posts.reduce((a, b) => a + b.reach, 0) / posts.length : 0;
+      const sorted = posts.map((p) => ({ ...p, viral: reachAvailable && avg > 0 && p.reach > avg * 2.5 }));
+      sorted.sort((a, b) => sort === 'engagement' ? b.rate - a.rate : b.reach - a.reach);
+      return { posts: sorted, avg, reachAvailable };
+    });
     res.json({
-      mode: 'LIVE', avg_reach: Math.round(avg), reach_available: reachAvailable,
-      viral_rule: reachAvailable ? 'Reach > Avg Reach x 2.5 = Viral' : 'Reach insights unavailable (read_insights chahiye) — engagement numbers real hain',
-      posts: out,
+      mode: 'LIVE', avg_reach: Math.round(out.avg), reach_available: out.reachAvailable,
+      viral_rule: out.reachAvailable ? 'Reach > Avg Reach x 2.5 = Viral' : 'Reach insights unavailable (read_insights chahiye) — engagement numbers real hain',
+      posts: out.posts,
     });
   } catch (e) { res.status(502).json({ error: 'FB Graph error', detail: fb.fbErr(e) }); }
 });
@@ -491,17 +512,17 @@ app.get('/api/overview', async (req, res) => {
     series: { labels: [], reach: [], engagement: [] }, per_page: [] };
   if (!pages.length) return res.json(empty);
 
-  const per = await Promise.all(pages.map(async (pg) => {
-    const pt = pg.page_token || undefined;
-    let followers = pg.followers_count || 0;
-    try {
-      const info = await fb.getPageInfo(pg.fb_page_id, pt);
-      followers = info.followers_count ?? info.fan_count ?? followers;
-    } catch {}
-    const byDate = {};
-    let video = 0;
-    try {
-      const s = await fb.getPageInsights(pg.fb_page_id, days, pt);
+  const per = await cached(`overview:${days}`, 5 * 60 * 1000, () =>
+    Promise.all(pages.map(async (pg) => {
+      const pt = pg.page_token || undefined;
+      // page info + insights parallel
+      const [info, s] = await Promise.all([
+        fb.getPageInfo(pg.fb_page_id, pt).catch(() => null),
+        fb.getPageInsights(pg.fb_page_id, days, pt).catch(() => ({})),
+      ]);
+      let followers = pg.followers_count || 0;
+      if (info) followers = info.followers_count ?? info.fan_count ?? followers;
+      const byDate = {};
       const push = (arr, key) => {
         if (!Array.isArray(arr)) return;
         for (const v of arr) {
@@ -512,13 +533,13 @@ app.get('/api/overview', async (req, res) => {
         }
       };
       push(s.views, 'reach'); push(s.engagements, 'engagement');
+      let video = 0;
       if (Array.isArray(s.video)) for (const v of s.video) video += v.value || 0;
-    } catch {}
     const views = Object.values(byDate).reduce((a, b) => a + (b.reach || 0), 0);
     const engs = Object.values(byDate).reduce((a, b) => a + (b.engagement || 0), 0);
     try { db.prepare('UPDATE pages SET followers_count=? WHERE id=?').run(followers, pg.id); } catch {}
     return { id: pg.id, name: pg.name, followers, views, engagements: engs, video, byDate };
-  }));
+  })));
 
   // dates union → summed series
   const allDates = [...new Set(per.flatMap((p) => Object.keys(p.byDate)))].sort();
@@ -543,8 +564,9 @@ app.get('/api/viral-global', async (req, res) => {
   if (!fb.isConnected()) return notConn(res);
   const limit = Math.min(25, +req.query.limit || 10);
   const pages = db.prepare('SELECT * FROM pages WHERE can_post=1').all();
-  const all = [];
-  const failed = [];
+  const { all, failed } = await cached(`viral:${limit}`, 3 * 60 * 1000, async () => {
+    const all = [];
+    const failed = [];
   await Promise.all(pages.map(async (pg) => {
     try {
       const raw = await fb.getPagePosts(pg.fb_page_id, 10, pg.page_token || undefined);
@@ -561,6 +583,8 @@ app.get('/api/viral-global', async (req, res) => {
       }
     } catch { failed.push(pg.name); }
   }));
+  return { all, failed };
+  });
   all.sort((a, b) => b.engagement - a.engagement);
   const avg = all.length ? all.reduce((a, p) => a + p.engagement, 0) / all.length : 0;
   res.json({

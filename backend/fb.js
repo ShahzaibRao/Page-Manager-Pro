@@ -129,6 +129,21 @@ async function getPostReach(fbPostId, token) {
   } catch { return null; }
 }
 
+// ---- concurrency limiter (no deps) ----
+function pLimit(n) {
+  let active = 0;
+  const q = [];
+  const next = () => {
+    if (active >= n || !q.length) return;
+    active++;
+    q.shift()().finally(() => { active--; next(); });
+  };
+  return (fn) => new Promise((resolve, reject) => {
+    q.push(() => fn().then(resolve, reject));
+    next();
+  });
+}
+
 // ---- page insights series (day-wise) ----
 // NOTE (new Pages experience): page_impressions / page_engaged_users / page_fans
 // Meta ne deprecate kar diye. Jo metrics REAL me kaam karte hain:
@@ -143,14 +158,14 @@ async function getPageInsights(fbPageId, days = 28, token) {
     ['page_post_engagements', 'engagements'],
     ['page_video_views', 'video'],
   ];
-  for (const [metric, key] of defs) {
+  await Promise.all(defs.map(async ([metric, key]) => {
     try {
       const r = await g(`/${fbPageId}/insights`, {
         metric, period: 'day', since: fmtD(since), until: fmtD(until),
       }, token);
       out[key] = (r.data && r.data[0] && r.data[0].values) || [];
     } catch (e) { out[key] = { error: fbErr(e) }; }
-  }
+  }));
   return out;
 }
 
@@ -294,7 +309,7 @@ async function getMonetization(fbPageId, followers, token) {
 }
 
 module.exports = {
-  isConnected, getToken,
+  isConnected, getToken, pLimit,
   validateToken, getBusinesses, getDirectPages, getBusinessPages, getPageToken, getPageTokensBatch, getPageInfo,
   getPagePosts, getPostReach, getPageInsights, getScheduledPosts,
   publishFeedWithMedia, scheduleFeedWithMedia,
