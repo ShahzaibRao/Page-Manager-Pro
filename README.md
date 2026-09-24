@@ -50,26 +50,43 @@ Switch anytime in **Settings → Appearance** (saved in browser). Arabic switche
 
 ---
 
-## 🚀 Run Locally (2 terminals)
+## 🚀 Run (Docker — recommended)
 
-**Requirements:** Node.js 20+
+**Requirements:** Docker + Docker Compose
 
-**Terminal 1 — Backend (port 4000):**
 ```bash
-cd backend
-npm install   # first time only
-npm start
+# 1. token lagao (sirf pehli dafa) — backend/.env banao (.env.example se), token dalo
+# 2. Windows: start-all.bat  |  ya:
+docker compose up --build -d
 ```
 
-**Terminal 2 — Frontend (port 3000):**
+| Service | URL | Notes |
+|---|---|---|
+| Dashboard | http://localhost:3000 | token Connect screen me paste karo → auto-sync |
+| API | http://localhost:4000/api/health | |
+| Postgres 16 | localhost:5432 | user `pmp`, db `pagemanager` (next phases ke liye ready) |
+| Redis 7 | localhost:6379 | next phases (BullMQ/cache) ke liye ready |
+
 ```bash
-cd frontend
-npm install   # first time only
-cp .env.example .env.local
-npm run dev
+docker compose ps          # status
+docker compose logs -f     # logs
+docker compose down        # stop (data volumes me mehfooz rehta hai)
 ```
 
-Open **http://localhost:3000** → paste your System User Token on the Connect screen → pages sync automatically.
+> Backend data (`data.db` + uploads) `backenddata` volume me persist hota hai.
+> Oracle/server pe yehi file chalegi — sirf `backend/.env` me asal token + strong `POSTGRES_PASSWORD`, aur build me `NEXT_PUBLIC_API_URL=http://SERVER-IP:4000` set karna hai.
+
+### Alternative: bina Docker (npm, quick dev)
+
+**Requirements:** Node.js 22+
+
+```bash
+# Terminal 1
+cd backend && npm install && npm start        # :4000
+# Terminal 2
+cd frontend && npm install && cp .env.example .env.local && npm run dev   # :3000
+```
+Windows one-click: `start-all.bat`. NOTE: `npm run build` dev server chalte hue mat chalao (`.next` corrupt hota hai) — pehle dev band karo.
 
 ### Environment
 
@@ -103,18 +120,23 @@ Full step-by-step: [`FB-SETUP-GUIDE.md`](FB-SETUP-GUIDE.md)
 
 ```
 CMS/
-├── backend/            # Express + node:sqlite + node-cron
-│   ├── index.js        # all APIs (connect/sync/posts/insights/viral/watchers/overview)
-│   ├── fb.js           # live Graph API service (no mocks)
-│   ├── db.js           # SQLite schema (pages/posts/logs/watchers)
-│   └── uploads/        # local upload staging (git-ignored)
-├── frontend/           # Next.js 14 + Tailwind + Recharts
-│   ├── app/page.tsx    # full dashboard (all 8 sections)
-│   └── lib/i18n.ts     # 5-language dictionary
-├── PRD-Page-Manager-Business-Method.md
-├── FB-SETUP-GUIDE.md
-├── CONSTITUTION.md     # project rules (real data, token security, compliance)
-├── MEMORY.md           # maintainer memory (state, API facts, incidents)
+├── docker-compose.yml      # postgres + redis + backend + frontend (Oracle-ready)
+├── backend/Dockerfile      # node:24-alpine, DATA_DIR=/data, healthcheck
+├── frontend/Dockerfile     # multi-stage standalone build
+├── backend/                # Express + node:sqlite + node-cron
+│   ├── index.js            # all APIs (connect/sync/posts/insights/viral/watchers/overview/history)
+│   ├── fb.js               # live Graph API service (no mocks)
+│   ├── db.js               # SQLite schema (DATA_DIR aware)
+│   └── uploads/            # local upload staging (git-ignored)
+├── frontend/               # Next.js 14 + Tailwind + Recharts
+│   ├── app/page.tsx        # full dashboard (11 sections)
+│   └── lib/i18n.ts         # 5-language dictionary
+├── docs/                   # Pages demo (index.html) + architecture.html
+├── PRD-Page-Manager-Business-Method.md   # v2.0 living spec
+├── FB-SETUP-GUIDE.md       # token + troubleshooting
+├── CONSTITUTION.md         # project rules
+├── MEMORY.md               # maintainer memory
+├── SUGGESTION.md           # cloud-scale plan
 └── Manager-Pro-Dashboard-Ui.html   # original UI design reference
 ```
 
@@ -125,7 +147,8 @@ CMS/
 
 ## ⚠️ Notes
 
-- Local-first: SQLite file DB (`backend/data.db`), `node-cron` scheduler — no Supabase/Redis/Vercel needed.
+- Docker (recommended): sab kuch containers me; data volumes me persist.
+- Local npm: SQLite file DB (`backend/data.db`), `node-cron` scheduler.
 - New Pages experience requires **Page access tokens** for page calls — the app stores them server-side on sync.
 - Some classic insights metrics are deprecated by Meta — the app uses working ones (`page_views_total`, `page_post_engagements`, `page_video_views`) with honest labels.
 - Avoid rapid test posting — Facebook rate-limits with spam blocks (code 368, temporary).
