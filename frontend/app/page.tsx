@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Area,
 } from "recharts";
@@ -16,9 +16,11 @@ const Ic = {
   pages: (c: string) => <I cls={c} d="M4 4h16v12H4zM8 20h8M12 16v4" />,
   plus: (c: string) => <I cls={c} d="M12 5v14M5 12h14" />,
   clock: (c: string) => <I cls={c} d="M12 6v6l4 2M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z" />,
+  report: (c: string) => <I cls={c} d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />,
   chart: (c: string) => <I cls={c} d="M3 3v18h18M7 15l4-6 4 3 5-8" />,
   cash: (c: string) => <I cls={c} d="M2 7h20v10H2zM16 12h.01M2 10h20" />,
   flame: (c: string) => <I cls={c} d="M12 22c4 0 7-2.7 7-6.5 0-4-3-6-3-9-3 1-4 3-4 3S9 7 9 4C5 7 5 12 5 15.5 5 19.3 8 22 12 22z" />,
+  logout: (c: string) => <I cls={c} d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />,
   zap: (c: string) => <I cls={c} d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />,
   folder: (c: string) => <I cls={c} d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />,
   gear: (c: string) => <I cls={c} d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z" />,
@@ -39,6 +41,7 @@ const NAV = [
   { id: "pages", k: "nav_pages", subk: "sub_bm", icon: Ic.pages },
   { id: "create", k: "nav_create", icon: Ic.plus },
   { id: "scheduled", k: "nav_scheduled", icon: Ic.clock },
+  { id: "reports", k: "nav_reports", icon: Ic.report },
   { id: "folders", k: "nav_folders", icon: Ic.folder },
   { id: "creator", k: "nav_creator", icon: Ic.zap },
   { id: "insights", k: "nav_insights", icon: Ic.chart },
@@ -48,7 +51,7 @@ const NAV = [
 ];
 const TITLE_KEYS: Record<string, string> = {
   dashboard: "t_dashboard", pages: "t_pages", create: "t_create",
-  scheduled: "t_scheduled", folders: "t_folders", creator: "t_creator", insights: "t_insights",
+  scheduled: "t_scheduled", reports: "t_reports", folders: "t_folders", creator: "t_creator", insights: "t_insights",
   monetization: "t_monetization", viral: "t_viral", settings: "t_settings",
 };
 const fmt = (n: number) => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "K" : `${n || 0}`;
@@ -64,12 +67,20 @@ const Empty = ({ title, sub, action }: any) => (
 );
 
 export default function Dashboard() {
-  const [lang, setLang] = useState<Lang>(() => {
-    try { return (localStorage.getItem("pmp_lang") as Lang) || "ur"; } catch { return "ur"; }
-  });
-  const [theme, setTheme] = useState<Theme>(() => {
-    try { return (localStorage.getItem("pmp_theme") as Theme) || "dark"; } catch { return "dark"; }
-  });
+  // NOTE: localStorage sirf mount ke baad parho — warna server/client HTML mismatch (hydration error)
+  const [lang, setLang] = useState<Lang>("ur");
+  const [theme, setTheme] = useState<Theme>("dark");
+  const [selId, setSelId] = useState("");
+  useEffect(() => {
+    try {
+      const s = localStorage.getItem("pmp_page");
+      if (s) setSelId(s);
+      const l = localStorage.getItem("pmp_lang") as Lang;
+      if (l) setLang(l);
+      const th = localStorage.getItem("pmp_theme") as Theme;
+      if (th) setTheme(th);
+    } catch {}
+  }, []);
   useEffect(() => {
     try { localStorage.setItem("pmp_lang", lang); } catch {}
     document.documentElement.lang = lang;
@@ -83,7 +94,9 @@ export default function Dashboard() {
   const [backendUp, setBackendUp] = useState(false);
   const [connected, setConnected] = useState(false);
   const [pages, setPages] = useState<any[]>([]);
-  const [selId, setSelId] = useState("");
+  useEffect(() => {
+    try { localStorage.setItem("pmp_page", selId || ""); } catch {}
+  }, [selId]);
   const [insights, setInsights] = useState<any>(null);
   const [range, setRange] = useState(28);
   const [health, setHealth] = useState<any>(null);
@@ -127,18 +140,45 @@ export default function Dashboard() {
   const [overview, setOverview] = useState<any>(null);
   const [gviral, setGviral] = useState<any>(null);
   const [gloading, setGloading] = useState(false);
+  const [syncedAt, setSyncedAt] = useState("");
+  const [hist, setHist] = useState<any>(null);
+  const [hrange, setHrange] = useState(28);
   const sel = selId === "GLOBAL"
     ? { id: "GLOBAL", name: "All Pages", category: "Global • overall insights", followers_count: overview?.kpis?.followers ?? 0, can_post: false }
     : (pages.find((p) => p.id === selId) || pages.find((p) => p.can_post) || pages[0]);
   const isGlobal = selId === "GLOBAL";
   const accessPages = useMemo(() => pages.filter((p) => p.can_post), [pages]);
+  const [pageSort, setPageSort] = useState("followers_desc");
   const filteredPages = useMemo(() => {
     const base = pageFilter === "access" ? accessPages : pages;
     const q = pageSearch.trim().toLowerCase();
-    const out = q ? base.filter((p) => (p.name || "").toLowerCase().includes(q)) : base;
+    let out = q ? base.filter((p) => (p.name || "").toLowerCase().includes(q)) : [...base];
+    if (pageSort === "followers_desc") out.sort((a, b) => (b.followers_count || 0) - (a.followers_count || 0));
+    else if (pageSort === "followers_asc") out.sort((a, b) => (a.followers_count || 0) - (b.followers_count || 0));
+    else out.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
     return out;
-  }, [pageFilter, accessPages, pages, pageSearch]);
+  }, [pageFilter, accessPages, pages, pageSearch, pageSort]);
+  // pages pagination (200 per page)
+  const PAGE_SIZE = 200;
+  const [pageNum, setPageNum] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(filteredPages.length / PAGE_SIZE));
+  const safePageNum = Math.min(pageNum, totalPages);
+  const pagedPages = filteredPages.slice((safePageNum - 1) * PAGE_SIZE, safePageNum * PAGE_SIZE);
+  const goPage = (n: number) => setPageNum(Math.max(1, Math.min(totalPages, n)));
+  useEffect(() => { setPageNum(1); }, [pageFilter, pageSearch, pages.length, pageSort]);
   const say = (t: string) => { setToast(t); setTimeout(() => setToast(""), 4000); };
+
+  const [user, setUser] = useState<any>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [booted, setBooted] = useState(false); // pehli data-load complete — is se pehle neutral UI (no flash)
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPass, setAuthPass] = useState("");
+  const [authName, setAuthName] = useState("");
+  const [authErr, setAuthErr] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authCfg, setAuthCfg] = useState<any>({ google: false, google_client_id: "" });
+  const googleBtnRef = useRef<HTMLDivElement>(null);
 
   const refreshPages = async () => {
     try {
@@ -146,44 +186,128 @@ export default function Dashboard() {
       setBackendUp(true); setConnected(h.connected);
       if (!h.connected) { setPages([]); return; }
       const b = await api.businesses();
+      if (b.synced_at) setSyncedAt(b.synced_at);
       const all = (b.businesses || []).flatMap((x: any) => x.pages || []);
       // fallback: direct pages endpoint (can_post flag ke sath)
       let list = all;
       try {
         const pg = await api.pages();
+        if (pg.synced_at) setSyncedAt(pg.synced_at);
         if ((pg.pages || []).length >= list.length) list = pg.pages;
-      } catch {}
+      } catch (e: any) {
+        if (e?.data?.need_login) return; // login nahi — backend off nahi
+        throw e;
+      }
       setPages(list);
-      if (list.length) {
+      if (list.length && selId !== "GLOBAL") {
         const cur = list.find((p: any) => p.id === selId);
         const preferred = cur || list.find((p: any) => p.can_post) || list[0];
-        setSelId(preferred.id);
+        if (preferred.id !== selId) setSelId(preferred.id);
       }
-    } catch { setBackendUp(false); }
+    } catch (e: any) {
+      if (e?.data?.need_login) return; // backend up hai, bas login chahiye
+      setBackendUp(false);
+    }
   };
 
-  useEffect(() => { (async () => { await refreshPages(); setLoading(false); })(); }, []);
+  useEffect(() => { (async () => {
+    try { await api.health(); setBackendUp(true); } catch { setBackendUp(false); }
+    try { setAuthCfg(await api.authConfig()); } catch {}
+    try { const m = await api.me(); setUser(m.user); } catch {}
+    setAuthChecked(true);
+  })(); }, []);
+
+  useEffect(() => {
+    if (!user) { setLoading(false); return; }
+    (async () => { await refreshPages(); setLoading(false); setBooted(true); })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  const doAuth = async () => {
+    setAuthErr("");
+    if (!authEmail.trim() || authPass.length < 6) { setAuthErr(authPass.length < 6 ? "Password min 6 characters" : "Email?"); return; }
+    setAuthBusy(true);
+    try {
+      const r = authMode === "signup"
+        ? await api.signup({ email: authEmail.trim(), password: authPass, name: authName.trim() })
+        : await api.login({ email: authEmail.trim(), password: authPass });
+      setUser(r.user);
+      setAuthPass("");
+    } catch (e: any) { setAuthErr(e.message || "Failed"); }
+    setAuthBusy(false);
+  };
+  const doGoogle = async (credential: string) => {
+    setAuthErr(""); setAuthBusy(true);
+    try {
+      const r = await api.google(credential);
+      setUser(r.user);
+    } catch (e: any) { setAuthErr(e.message || "Google failed"); }
+    setAuthBusy(false);
+  };
+  const doLogout = async () => {
+    try { await api.logout(); } catch {}
+    setUser(null); setPages([]); setConnected(false); setSelId(""); setTab("dashboard");
+    setInsights(null); setMonet(null); setViral(null); setOverview(null); setGviral(null); setHist(null);
+  };
+  // Google button (GIS) — sirf tab jab backend ne client id di ho
+  useEffect(() => {
+    if (user || !authCfg.google || !authCfg.google_client_id) return;
+    const w = window as any;
+    const render = () => {
+      if (!w.google || !googleBtnRef.current) return;
+      w.google.accounts.id.initialize({ client_id: authCfg.google_client_id, callback: (r: any) => doGoogle(r.credential), auto_select: false });
+      w.google.accounts.id.renderButton(googleBtnRef.current, { theme: "filled_blue", size: "large", width: 320 });
+    };
+    if (w.google) { render(); return; }
+    const s = document.createElement("script");
+    s.src = "https://accounts.google.com/gsi/client";
+    s.async = true; s.defer = true; s.onload = render;
+    document.head.appendChild(s);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, authCfg]);
 
   useEffect(() => {
     if (!sel || sel.id === "GLOBAL") return;
+    // core: dashboard ke liye (chart, KPIs, monet mini, queue badge)
     (async () => {
       try {
-        const [ins, hh, mo, vi, q] = await Promise.all([
+        const [ins, mo, q] = await Promise.all([
           api.insights(sel.id, range).catch((e) => e.data || { error: true }),
-          api.pageHealth(sel.id).catch((e) => e.data || { error: true }),
           api.monetization(sel.id).catch((e) => e.data || { error: true }),
-          api.topPosts(sel.id, viralSort).catch((e) => e.data || { error: true }),
           api.scheduled(sel.id).catch(() => ({ local: [], remote: [] })),
         ]);
         setInsights(ins.error ? null : ins);
-        setHealth(hh.error ? null : hh);
         setMonet(mo.error ? null : mo);
-        setViral(vi.error ? null : vi);
         setQueue(q);
       } catch {}
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selId, range, viralSort]);
+  }, [selId, range]);
+
+  // lazy: top posts SIRF viral tab khulne pe (sab se slow call)
+  useEffect(() => {
+    if (!sel || sel.id === "GLOBAL" || tab !== "viral") return;
+    setViral(null);
+    (async () => {
+      try {
+        const vi = await api.topPosts(sel.id, viralSort).catch((e) => e.data || { error: true });
+        setViral(vi.error ? null : vi);
+      } catch {}
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selId, viralSort, tab]);
+
+  // lazy: page health SIRF settings tab pe
+  useEffect(() => {
+    if (!sel || sel.id === "GLOBAL" || tab !== "settings") return;
+    (async () => {
+      try {
+        const hh = await api.pageHealth(sel.id).catch((e) => e.data || { error: true });
+        setHealth(hh.error ? null : hh);
+      } catch {}
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selId, tab]);
 
   // global data (sab posting-access pages)
   useEffect(() => {
@@ -198,6 +322,20 @@ export default function Dashboard() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selId, range]);
+
+  // posting history (dashboard widget + reports)
+  useEffect(() => {
+    if (!backendUp) return;
+    if (tab !== "dashboard" && tab !== "reports") return;
+    if (selId !== "GLOBAL" && !sel) return;
+    (async () => {
+      try {
+        const h = await api.history(hrange, selId === "GLOBAL" ? "" : (sel?.id || ""));
+        setHist(h);
+      } catch {}
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, hrange, selId, backendUp]);
 
   useEffect(() => {
     if (tab === "settings" && backendUp) {
@@ -221,7 +359,10 @@ export default function Dashboard() {
       setConnToken("");
       say(`Connected ✓ ${r.me?.name || ""} — ${r.pages} pages (${r.with_access ?? 0} posting access)${(r.notes || []).length ? " • " + r.notes.join("; ") : ""}`);
       await refreshPages();
-    } catch (e: any) { say(e.message || "Connect failed"); }
+    } catch (e: any) {
+      const d = e?.data?.detail || {};
+      say(d.error_user_msg || d.message || e.message || "Connect failed");
+    }
     setConnecting(false);
   };
   const doSync = async () => {
@@ -302,7 +443,35 @@ export default function Dashboard() {
     catch (e: any) { say(e.message); }
   };
 
-  // ---- instant watchers ----
+  // ---- stock alerts (auto-folder low files) ----
+  const [alerts, setAlerts] = useState<any[]>([]);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const notifiedRef = useRef<Set<number>>(new Set());
+  const stockMeta = (s: string) => s === "critical"
+    ? { label: t(lang, "notif_critical"), color: "#FF6B6B" }
+    : s === "watch"
+    ? { label: t(lang, "notif_watch"), color: "#FFB86A" }
+    : { label: t(lang, "notif_low"), color: "#FFD166" };
+  const loadAlerts = async () => {
+    try {
+      const w = await api.watchers();
+      const low = (w.watchers || []).filter((x: any) => x.stock && x.stock !== "ok");
+      setAlerts(low);
+      for (const x of low) {
+        if (x.stock === "critical" && !notifiedRef.current.has(x.id)) {
+          notifiedRef.current.add(x.id);
+          say(`🔴 ${x.name}: ${x.files} files (${x.days_left} ${t(lang, "days_unit")}) — ${t(lang, "notif_critical")}`);
+        }
+      }
+    } catch {}
+  };
+  useEffect(() => {
+    if (!backendUp) return;
+    loadAlerts();
+    const iv = setInterval(loadAlerts, 60000);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backendUp, lang]);
   const loadInstant = async () => {
     try { const w = await api.instant(); setIwatches(w.watchers || []); } catch {}
   };
@@ -341,6 +510,87 @@ export default function Dashboard() {
   ];
   const queuedCount = (queue.local || []).length;
 
+  const rangeBtns = (val: number, set: (n: number) => void) => (
+    <div className="flex gap-2">{[7, 28, 90].map((r) => (
+      <button key={r} onClick={() => set(r)} className={`h-7 px-3 rounded-full text-[12px] ${val === r ? "bg-[#1877F2]" : "t-panel border t-line3 t-m1"}`}>{r}d</button>
+    ))}</div>
+  );
+  const histWidget = hist ? (
+    <div className="rounded-[18px] t-card border t-line p-5">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h3 className="text-[15px] font-semibold">{t(lang, "rep_daily")} • {hrange}d{isGlobal ? "" : ` • ${sel?.name || ""}`}</h3>
+        <div className="flex items-center gap-2">
+          {rangeBtns(hrange, setHrange)}
+          <button onClick={() => setTab("reports")} className="h-7 px-3 rounded-full text-[12px] t-panel border t-line3 t-m1">{t(lang, "rep_view")} →</button>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4">
+        {[[t(lang, "rep_total"), hist.total, "#1877F2"], [t(lang, "rep_text"), (hist.by_type.text || 0) + (hist.by_type.link || 0), "#8B5CF6"], [t(lang, "rep_photos"), hist.by_type.photo || 0, "#EC4899"], [t(lang, "rep_videos"), hist.by_type.video || 0, "#3DD598"], [t(lang, "rep_reels"), hist.by_type.reel || 0, "#FFB86A"]].map(([l, v, c]: any) => (
+          <div key={String(l)} className="rounded-[12px] t-inner border t-line p-3 text-center">
+            <div className="text-[20px] font-semibold" style={{ color: c }}>{v}</div>
+            <div className="text-[11px] t-m2 mt-0.5">{l}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  ) : null;
+
+  /* ================= AUTH SCREEN ================= */
+  const AuthScreen = (
+    <div className="min-h-screen t-bg t-text flex items-center justify-center p-4">
+      <div className="w-full max-w-[420px] rounded-[20px] t-card border t-line p-6 lg:p-8 relative overflow-hidden">
+        <div className="absolute -top-20 -right-20 w-56 h-56 bg-[#1877F2]/15 blur-[60px] rounded-full" />
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-[12px] bg-[#1877F2] flex items-center justify-center font-bold text-[16px] shadow-[0_0_20px_rgba(24,119,242,0.4)]">P</div>
+          <div>
+            <div className="font-semibold text-[16px]">Page Manager Pro</div>
+            <div className="text-[11px] t-m2">{t(lang, "auth_tag")}</div>
+          </div>
+        </div>
+        <div className="mt-6 flex gap-2">
+          {(["login", "signup"] as const).map((m) => (
+            <button key={m} onClick={() => { setAuthMode(m); setAuthErr(""); }}
+              className={`flex-1 h-9 rounded-full text-[13px] font-medium ${authMode === m ? "bg-[#1877F2]" : "t-panel border t-line3 t-m1"}`}>
+              {m === "login" ? t(lang, "auth_login") : t(lang, "auth_signup")}
+            </button>
+          ))}
+        </div>
+        <div className="mt-4 space-y-3">
+          {authMode === "signup" && (
+            <input value={authName} onChange={(e) => setAuthName(e.target.value)} placeholder={t(lang, "auth_name")}
+              className="w-full h-11 rounded-[12px] t-bg border t-line px-4 text-[13px] focus:outline-none" />
+          )}
+          <input value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} placeholder={t(lang, "auth_email")} type="email" autoComplete="email"
+            className="w-full h-11 rounded-[12px] t-bg border t-line px-4 text-[13px] focus:outline-none" onKeyDown={(e) => e.key === "Enter" && doAuth()} />
+          <input value={authPass} onChange={(e) => setAuthPass(e.target.value)} placeholder={t(lang, "auth_password")} type="password" autoComplete={authMode === "signup" ? "new-password" : "current-password"}
+            className="w-full h-11 rounded-[12px] t-bg border t-line px-4 text-[13px] focus:outline-none" onKeyDown={(e) => e.key === "Enter" && doAuth()} />
+        </div>
+        {authErr && <div className="mt-3 p-2.5 rounded-[10px] bg-[#2A1515] border border-red-900 text-[12px] text-red-400">{authErr}</div>}
+        {!backendUp && (
+          <div className="mt-3 p-2.5 rounded-[10px] bg-[#2A1F15] border border-[#4A3520] text-[12px] text-[#FFB86A]">
+            {t(lang, "backend_off")} <code>cd backend && npm start</code>
+          </div>
+        )}
+        <button onClick={doAuth} disabled={authBusy}
+          className="mt-4 w-full h-11 rounded-full bg-[#1877F2] text-[14px] font-medium hover:bg-[#166FE5] disabled:opacity-50">
+          {authBusy ? "..." : authMode === "login" ? t(lang, "auth_login") : t(lang, "auth_signup")}
+        </button>
+        <button onClick={() => { setAuthMode(authMode === "login" ? "signup" : "login"); setAuthErr(""); }}
+          className="mt-3 w-full text-center text-[12px] t-m2 t-texth">
+          {authMode === "login" ? t(lang, "auth_new") : t(lang, "auth_have")}
+        </button>
+        {authCfg.google && (
+          <>
+            <div className="my-4 flex items-center gap-3 text-[11px] t-m3">
+              <span className="flex-1 border-t t-line" /><span>OR</span><span className="flex-1 border-t t-line" />
+            </div>
+            <div ref={googleBtnRef} className="flex justify-center min-h-[40px]" />
+          </>
+        )}
+      </div>
+    </div>
+  );
+
   /* ================= CONNECT SCREEN ================= */
   const ConnectCard = (
     <div className="max-w-[640px] rounded-[20px] t-card border t-line p-6 lg:p-8 relative overflow-hidden">
@@ -366,6 +616,11 @@ export default function Dashboard() {
       </button>
     </div>
   );
+
+  /* ================= GATE: login ke baghair kuch nahi ================= */
+  // Yahan early return hai taake bina login sidebar/header/dashboard bilkul render na ho.
+  // AuthScreen khud min-h-screen centered hai.
+  if (authChecked && !user) return AuthScreen;
 
   return (
     <div className="min-h-screen t-bg t-text flex antialiased" style={{ fontFamily: "Inter,system-ui" }}>
@@ -402,18 +657,18 @@ export default function Dashboard() {
               {t(lang, "sys_token")}
             </div>
             <p className="text-[11px] t-m2 mt-2 leading-[1.5]">{t(lang, "sys_token_desc")}</p>
-            <div className={`mt-3 flex items-center gap-2 text-[11px] font-medium ${connected ? "text-[#3DD598]" : "text-[#FFB86A]"}`}>
-              <span className={`w-2 h-2 rounded-full animate-pulse ${connected ? "bg-[#3DD598]" : "bg-[#FFB86A]"}`} />
-              {connected ? `${t(lang, "token_on")} • ${pages.length} ${t(lang, "jwt_pages")}` : t(lang, "token_off")}
+            <div className={`mt-3 flex items-center gap-2 text-[11px] font-medium ${!booted ? "t-m2" : connected ? "text-[#3DD598]" : "text-[#FFB86A]"}`}>
+              <span className={`w-2 h-2 rounded-full animate-pulse ${!booted ? "bg-current" : connected ? "bg-[#3DD598]" : "bg-[#FFB86A]"}`} />
+              {!booted ? "…" : connected ? `${t(lang, "token_on")} • ${pages.length} ${t(lang, "jwt_pages")}` : t(lang, "token_off")}
             </div>
           </div>
         </div>
         <div className="p-3 border-t t-line2">
           <div className="flex items-center gap-3 px-3 py-2.5 rounded-[12px] t-card border t-line">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#1877F2] to-[#0A58CA] flex items-center justify-center text-[12px] font-bold">SR</div>
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#1877F2] to-[#0A58CA] flex items-center justify-center text-[12px] font-bold">{(user?.name || user?.email || "U").slice(0, 1).toUpperCase()}</div>
             <div className="flex-1 min-w-0">
-              <div className="text-[13px] font-medium truncate">Shahzaib Rao</div>
-              <div className="text-[11px] t-m2 truncate">{t(lang, "role_admin")}</div>
+              <div className="text-[13px] font-medium truncate">{user?.name || user?.email || ""}</div>
+              <div className="text-[11px] t-m2 truncate">{user?.email || ""}</div>
             </div>
           </div>
         </div>
@@ -449,9 +704,9 @@ export default function Dashboard() {
             </div>
           </button>
           <div className="hidden md:flex items-center gap-2 text-[13px]">
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border ${connected ? "bg-[#132E1F] border-[#1E4A2E] text-[#3DD598]" : "bg-[#2A1F15] border-[#4A3520] text-[#FFB86A]"}`}>
-              <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${connected ? "bg-[#3DD598]" : "bg-[#FFB86A]"}`} />
-              {connected ? t(lang, "connected") : t(lang, "not_connected")}
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border ${!booted ? "t-card border t-line t-m2" : connected ? "bg-[#132E1F] border-[#1E4A2E] text-[#3DD598]" : "bg-[#2A1F15] border-[#4A3520] text-[#FFB86A]"}`}>
+              <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${!booted ? "bg-current" : connected ? "bg-[#3DD598]" : "bg-[#FFB86A]"}`} />
+              {!booted ? "…" : connected ? t(lang, "connected") : t(lang, "not_connected")}
             </div>
             <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full t-card border t-line t-m1 text-[12px]">
               {Ic.shield("w-3.5 h-3.5 t-m2")} {t(lang, "sys_token")}
@@ -501,8 +756,41 @@ export default function Dashboard() {
             {connected && (
               <button onClick={doSync} title="Re-sync from Facebook" className="h-9 px-3 rounded-full t-card border t-line flex items-center gap-1.5 text-[12px] t-m1 t-texth">{Ic.refresh("w-3.5 h-3.5")} Sync</button>
             )}
-            <button className="w-9 h-9 rounded-full t-card border t-line flex items-center justify-center t-m1 t-texth">{Ic.bell("w-4 h-4")}</button>
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#8B5CF6] to-[#1877F2] flex items-center justify-center text-[12px] font-bold">SR</div>
+            <div className="relative">
+              <button onClick={() => setNotifOpen(!notifOpen)} title={t(lang, "notif_title")}
+                className="w-9 h-9 rounded-full t-card border t-line flex items-center justify-center t-m1 t-texth relative">
+                {Ic.bell("w-4 h-4")}
+                {alerts.length > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">{alerts.length}</span>
+                )}
+              </button>
+              {notifOpen && (
+                <div className="absolute right-0 mt-2 w-[320px] rounded-[16px] t-card border t-line3 shadow-[0_20px_60px_rgba(0,0,0,0.6)] overflow-hidden z-50">
+                  <div className="p-3 text-[11px] font-semibold tracking-widest t-m3 uppercase">{t(lang, "notif_title")} • {alerts.length}</div>
+                  <div className="max-h-[320px] overflow-auto">
+                    {alerts.length === 0 && <div className="px-4 py-5 text-[13px] t-m2">{t(lang, "notif_empty")}</div>}
+                    {alerts.map((a) => {
+                      const m = stockMeta(a.stock);
+                      return (
+                        <button key={a.id} onClick={() => { setNotifOpen(false); setTab("folders"); }}
+                          className="w-full flex items-center gap-3 px-4 py-3 t-hover text-left">
+                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: m.color }} />
+                          <span className="flex-1 min-w-0">
+                            <span className="text-[13px] font-medium block truncate">{a.name}</span>
+                            <span className="text-[11px] t-m2 block">{a.files} files • {a.days_left} {t(lang, "days_unit")} • <b style={{ color: m.color }}>{m.label}</b></span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button onClick={() => { setNotifOpen(false); setTab("folders"); }}
+                    className="w-full py-2.5 text-[12px] t-m1 border-t t-line t-hover">{t(lang, "notif_view")} →</button>
+                </div>
+              )}
+            </div>
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#8B5CF6] to-[#1877F2] flex items-center justify-center text-[12px] font-bold" title={user?.email || ""}>{(user?.name || user?.email || "U").slice(0, 1).toUpperCase()}</div>
+            <button onClick={doLogout} title={t(lang, "auth_logout")}
+              className="w-8 h-8 rounded-full t-card border t-line hidden sm:flex items-center justify-center t-m2 hover:text-red-400">{Ic.logout("w-3.5 h-3.5")}</button>
           </div>
         </header>
 
@@ -512,6 +800,7 @@ export default function Dashboard() {
             <p className="text-[14px] t-m2 mt-1">
               {tab === "pages" ? t(lang, "sub_pages")
                 : sel ? `${sel.name} • ${sel.category || ""}` : t(lang, "sub_real")}
+              {syncedAt ? <span className="t-m3"> • {t(lang, "data_synced")}: {new Date(syncedAt.replace(" ", "T") + "Z").toLocaleString()}</span> : null}
             </p>
           </div>
 
@@ -521,7 +810,7 @@ export default function Dashboard() {
             </div>
           )}
 
-          {loading ? (
+          {!authChecked || loading || (user && !booted) ? (
             <div className="t-m2 text-[14px]">{t(lang, "loading")}</div>
           ) : !connected || pages.length === 0 ? (
             <>{ConnectCard}</>
@@ -547,6 +836,7 @@ export default function Dashboard() {
                       </div>
                     ))}
                   </div>
+                  {histWidget}
                   <div className="rounded-[18px] t-card border t-line p-5 lg:p-6">
                     <div className="flex items-center justify-between">
                       <div><h3 className="text-[15px] font-semibold">{t(lang, "global_title")}</h3>
@@ -628,6 +918,7 @@ export default function Dashboard() {
                       </div>
                     ))}
                   </div>
+                  {histWidget}
                   {!insights ? (
                     <Empty title={t(lang, "insights_unavail")} sub={t(lang, "insights_unavail_sub")}
                       action={<button onClick={doSync} className="mt-4 h-9 px-5 rounded-full bg-[#1877F2] text-[13px] font-medium">{t(lang, "resync")}</button>} />
@@ -691,7 +982,13 @@ export default function Dashboard() {
                     </button>
                     <input value={pageSearch} onChange={(e) => setPageSearch(e.target.value)} placeholder={t(lang, "search_pages")}
                       className="h-8 px-3 rounded-full t-card border t-line text-[13px] focus:outline-none w-[200px]" />
-                    <span className="text-[12px] t-m3 ml-auto">{t(lang, "showing")} {Math.min(filteredPages.length, 200)} {t(lang, "of")} {filteredPages.length}</span>
+                    <select value={pageSort} onChange={(e) => setPageSort(e.target.value)}
+                      className="h-8 px-2 rounded-full t-card border t-line text-[12px] focus:outline-none" title={t(lang, "sort_l")}>
+                      <option value="followers_desc">{t(lang, "sort_top")}</option>
+                      <option value="followers_asc">{t(lang, "sort_low")}</option>
+                      <option value="name">{t(lang, "sort_az")}</option>
+                    </select>
+                    <span className="text-[12px] t-m3 ml-auto">{t(lang, "showing")} {(safePageNum - 1) * PAGE_SIZE + 1}–{Math.min(safePageNum * PAGE_SIZE, filteredPages.length)} {t(lang, "of")} {filteredPages.length}</span>
                   </div>
                   {pageFilter === "access" && accessPages.length === 0 && (
                     <div className="p-3 rounded-[12px] bg-[#2A1F15] border border-[#4A3520] text-[13px] text-[#FFB86A]">
@@ -699,7 +996,7 @@ export default function Dashboard() {
                     </div>
                   )}
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-                    {filteredPages.slice(0, 200).map((p) => (
+                    {pagedPages.map((p) => (
                     <div key={p.id} onClick={() => setSelId(p.id)}
                       className={`rounded-[20px] border p-6 relative overflow-hidden cursor-pointer ${p.id === selId ? "t-card2 border-[#1877F2]/50 shadow-[0_0_30px_rgba(24,119,242,0.15)]" : "t-card t-line t-line3h"}`}>
                       <div className="flex items-start justify-between">
@@ -721,6 +1018,28 @@ export default function Dashboard() {
                     </div>
                     ))}
                   </div>
+                  {totalPages > 1 && (
+                    <div className="flex items-center justify-center gap-1.5 flex-wrap pt-2">
+                      <button onClick={() => goPage(safePageNum - 1)} disabled={safePageNum <= 1}
+                        className="h-8 px-3 rounded-full t-panel border t-line3 text-[12px] disabled:opacity-40">← Prev</button>
+                      {Array.from({ length: totalPages }, (_, i) => i + 1)
+                        .filter((n) => n === 1 || n === totalPages || Math.abs(n - safePageNum) <= 2)
+                        .reduce<(number | "…")[]>((acc, n) => {
+                          const prev = acc[acc.length - 1];
+                          if (typeof prev === "number" && (n as number) - prev > 1) acc.push("…");
+                          acc.push(n);
+                          return acc;
+                        }, [])
+                        .map((n, i) => n === "…" ? (
+                          <span key={"e" + i} className="text-[12px] t-m3 px-1">…</span>
+                        ) : (
+                          <button key={n} onClick={() => goPage(n)}
+                            className={`h-8 min-w-[32px] px-2 rounded-full text-[12px] font-medium ${n === safePageNum ? "bg-[#1877F2]" : "t-panel border t-line3 t-m1"}`}>{n}</button>
+                        ))}
+                      <button onClick={() => goPage(safePageNum + 1)} disabled={safePageNum >= totalPages}
+                        className="h-8 px-3 rounded-full t-panel border t-line3 text-[12px] disabled:opacity-40">Next →</button>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -890,6 +1209,13 @@ export default function Dashboard() {
                         <div className="font-medium text-[14px]">{w.name} <span className={`ml-1 text-[10px] px-2 py-0.5 rounded-full ${w.status === "active" ? "bg-[#132E1F] text-[#3DD598]" : "t-panel t-m2"}`}>{w.status}</span></div>
                         <div className="text-[12px] t-m2 mt-0.5 truncate">{w.folder_path}</div>
                         <div className="text-[12px] t-m2">→ {w.page_name} • {t(lang, "f_daily")} {w.daily_time} • {w.post_as === "reel" ? t(lang, "reel") : t(lang, "video_post")} • {w.per_run}/{t(lang, "f_daily")} • {w.files} {t(lang, "f_files")} • {t(lang, "f_last")}: {w.last_run || "—"}</div>
+                        {w.stock && w.stock !== "ok" && (() => { const m = stockMeta(w.stock); return (
+                          <div className="text-[12px] mt-1 flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: m.color }} />
+                            <b style={{ color: m.color }}>{m.label}</b>
+                            <span className="t-m2">• {w.files} files = {w.days_left} {t(lang, "days_unit")}</span>
+                          </div>
+                        ); })()}
                       </div>
                       <div className="flex gap-2">
                         <button onClick={() => runWatcherNow(w.id)} className="h-8 px-3 rounded-full t-panel border t-line3 text-[12px]">{t(lang, "f_run")}</button>
@@ -1068,7 +1394,9 @@ export default function Dashboard() {
                   </div>
                 )
               ) : (
-                !viral || !viral.posts?.length ? (
+                !viral ? (
+                  <div className="t-m2 text-[14px]">{t(lang, "loading")}</div>
+                ) : !viral.posts?.length ? (
                   <Empty title={t(lang, "no_posts")} sub={t(lang, "no_posts_sub")}
                     action={<button onClick={doSync} className="mt-4 h-9 px-5 rounded-full bg-[#1877F2] text-[13px] font-medium">{t(lang, "resync")}</button>} />
                 ) : (
@@ -1107,6 +1435,58 @@ export default function Dashboard() {
               {/* ===== SETTINGS ===== */}
 
               {/* ===== SETTINGS ===== */}
+              {/* ===== REPORTS ===== */}
+              {tab === "reports" && (
+                <div className="space-y-6 max-w-[1080px]">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[12px] t-m2">{isGlobal ? t(lang, "all_pages_global") : sel?.name}</span>
+                    <span className="ml-auto" />
+                    {rangeBtns(hrange, setHrange)}
+                  </div>
+                  {hist ? (
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+                      {[[t(lang, "rep_total"), hist.total, "#1877F2"], [t(lang, "rep_text"), (hist.by_type.text || 0) + (hist.by_type.link || 0), "#8B5CF6"], [t(lang, "rep_photos"), hist.by_type.photo || 0, "#EC4899"], [t(lang, "rep_videos"), hist.by_type.video || 0, "#3DD598"], [t(lang, "rep_reels"), hist.by_type.reel || 0, "#FFB86A"]].map(([l, v, c]: any) => (
+                        <div key={String(l)} className="rounded-[18px] t-card border t-line p-5 relative overflow-hidden">
+                          <div className="absolute top-0 right-0 w-24 h-24 blur-[40px] opacity-20" style={{ background: c }} />
+                          <div className="text-[28px] font-semibold leading-none">{v}</div>
+                          <div className="text-[13px] t-m2 mt-1.5 font-medium">{l} • {hrange}d</div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="t-m2 text-[14px]">{t(lang, "loading")}</div>
+                  )}
+                  <div className="rounded-[18px] t-card border t-line overflow-hidden">
+                    <div className="p-5 border-b t-line font-semibold text-[15px]">{t(lang, "rep_daily")} • {hrange}d</div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left">
+                        <thead className="text-[11px] tracking-widest uppercase t-m3 border-b t-line">
+                          <tr>
+                            <th className="p-4 font-medium">{t(lang, "rep_daily").split(" ")[0]}</th>
+                            <th className="p-4 font-medium">{t(lang, "page_h")}</th>
+                            <th className="p-4 font-medium">{t(lang, "rep_published")}</th>
+                            <th className="p-4 font-medium">{t(lang, "rep_failed")}</th>
+                            <th className="p-4 font-medium">{t(lang, "rep_errors")}</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y t-divide">
+                          {(hist?.daily || []).map((r: any, i: number) => (
+                            <tr key={i} className="t-hover">
+                              <td className="p-4 text-[13px] whitespace-nowrap">{r.date}</td>
+                              <td className="p-4 text-[13px] font-medium">{r.page_name}</td>
+                              <td className="p-4 text-[13px] font-medium" style={{ color: r.published ? "#3DD598" : undefined }}>{r.published}</td>
+                              <td className="p-4 text-[13px] font-medium" style={{ color: r.failed ? "#FF6B6B" : undefined }}>{r.failed}</td>
+                              <td className="p-4 text-[11px] t-m2 max-w-[320px]"><div className="truncate" title={r.errors}>{r.errors || "—"}</div></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {!(hist?.daily || []).length && <div className="p-6 text-center t-m2 text-[13px]">{t(lang, "rep_empty")}</div>}
+                  </div>
+                </div>
+              )}
+
               {tab === "settings" && (
                 <div className="max-w-[720px] space-y-4">
                   <div className="rounded-[18px] t-card border t-line p-6">

@@ -1,0 +1,71 @@
+# Page Manager Pro — local + Oracle (docker compose)
+# Oracle 4c/24GB/200GB: yehi file chalegi, sirf .env + API URL badlega.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pmp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pmp_dev_only}
+      POSTGRES_DB: pagemanager
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pmp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env          # real token yahin se (gitignored) + DATABASE_URL/REDIS_URL neeche override
+    environment:
+      PORT: 4000
+      DATA_DIR: /data
+      DATABASE_URL: postgres://pmp:${POSTGRES_PASSWORD:-pmp_dev_only}@postgres:5432/pagemanager
+      REDIS_URL: redis://redis:6379
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+    volumes:
+      - backenddata:/data       # data.db + uploads persist
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    environment:
+      # Docker sets HOSTNAME=<container-id>; Next standalone usi pe bind ho jata hai.
+      # 0.0.0.0 lazmi taake port mapping + healthcheck kaam kare.
+      HOSTNAME: 0.0.0.0
+      # Server-side proxy target (browser ko iski khabar nahi — koi IP bake nahi hota)
+      BACKEND_INTERNAL_URL: http://backend:4000
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:
+  backenddata:

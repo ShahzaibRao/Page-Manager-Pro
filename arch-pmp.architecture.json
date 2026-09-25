@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Page Manager Pro — Cloud Architecture",
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "request-path", "label": "User request path", "focus": ["users", "cdn", "web", "api", "db"], "note": "Browser to data through CDN, app and database." },
+      { "id": "identity", "label": "Auth and token vault", "focus": ["auth", "api", "db"], "note": "Login plus AES-encrypted FB tokens per user." },
+      { "id": "async", "label": "Queues and cache", "focus": ["api", "queue", "worker", "cache", "fb"], "note": "BullMQ jobs and Redis cache in front of Graph API." }
+    ]
+  },
+  "components": [
+    { "id": "users", "type": "external", "label": "Users", "sublabel": "Browser", "pos": [40, 320], "size": [120, 60] },
+    { "id": "auth", "type": "security", "label": "NextAuth", "sublabel": "Google + Email", "pos": [40, 130], "size": [130, 64], "tag": "JWT sessions" },
+    { "id": "cdn", "type": "cloud", "label": "CDN", "sublabel": "static + gzip", "pos": [250, 320], "size": [130, 60] },
+    { "id": "web", "type": "frontend", "label": "Next.js 14", "sublabel": ":3000 lazy tabs", "pos": [460, 320], "size": [130, 60] },
+    { "id": "api", "type": "backend", "label": "Express API", "sublabel": ":4000 JWT + limit", "pos": [670, 320], "size": [130, 60] },
+    { "id": "cache", "type": "database", "label": "Redis cache", "sublabel": "TTL :6379", "pos": [670, 130], "size": [130, 60] },
+    { "id": "db", "type": "database", "label": "Postgres 16", "sublabel": "users + AES tokens", "pos": [880, 320], "size": [140, 60] },
+    { "id": "queue", "type": "messagebus", "label": "BullMQ", "sublabel": "Redis queues", "pos": [670, 470], "size": [130, 60] },
+    { "id": "worker", "type": "backend", "label": "Worker", "sublabel": "publish + sync", "pos": [880, 470], "size": [140, 60] },
+    { "id": "fb", "type": "external", "label": "FB Graph v26", "sublabel": "pages + insights", "pos": [1090, 395], "size": [140, 60] },
+    { "id": "compose", "type": "cloud", "label": "Docker Compose", "sublabel": "Oracle 4c 24GB", "pos": [250, 470], "size": [140, 60], "tag": "web api worker pg redis" },
+    { "id": "actions", "type": "cloud", "label": "GitHub Actions", "sublabel": "CI + GHCR", "pos": [460, 470], "size": [130, 60] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Oracle Cloud — docker compose", "wraps": ["web", "api", "cache", "db", "queue", "worker", "compose"] },
+    { "kind": "security-group", "label": "sg-app :3000/:4000 JWT", "wraps": ["web", "api"] }
+  ],
+  "connections": [
+    { "id": "u-cdn", "from": "users", "to": "cdn", "label": "HTTPS", "variant": "emphasis" },
+    { "id": "cdn-web", "from": "cdn", "to": "web" },
+    { "id": "web-api", "from": "web", "to": "api" },
+    { "id": "auth-api", "from": "auth", "to": "api", "label": "verify session", "variant": "security" },
+    { "id": "api-cache", "from": "api", "to": "cache", "label": "TTL read" },
+    { "id": "api-db", "from": "api", "to": "db", "label": "Prisma SQL" },
+    { "id": "api-queue", "from": "api", "to": "queue", "label": "enqueue", "variant": "dashed", "labelDy": 24 },
+    { "id": "q-worker", "from": "queue", "to": "worker" },
+    { "id": "worker-fb", "from": "worker", "to": "fb", "label": "publish", "labelDy": -3 },
+    { "id": "api-fb", "from": "api", "to": "fb", "label": "live reads", "variant": "dashed", "labelDy": 16 },
+    { "id": "actions-compose", "from": "actions", "to": "compose", "label": "rolling deploy", "variant": "dashed", "labelDy": 54 }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Edge", "items": ["CDN + gzip serves the split Next.js bundle", "JWT sessions from Google and email login"] },
+    { "dot": "emerald", "title": "Application", "items": ["Express API with rate limits", "Redis TTL cache cuts Graph calls", "BullMQ worker drains publish and sync queues"] },
+    { "dot": "violet", "title": "Data", "items": ["Postgres holds users and AES-encrypted FB tokens", "One compose file runs web, api, worker, pg, redis"] },
+    { "dot": "amber", "title": "External", "items": ["Facebook Graph v26 page tokens per user", "GitHub Actions ships GHCR images"] }
+  ]
+}

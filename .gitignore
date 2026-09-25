@@ -13,9 +13,11 @@ node_modules/
 frontend/.next/
 frontend/out/
 backend/node_modules/
+*.tsbuildinfo
 
 # OS / editor
 .DS_Store
 Thumbs.db
 *.log
 .vscode/
+*.visual-check.*

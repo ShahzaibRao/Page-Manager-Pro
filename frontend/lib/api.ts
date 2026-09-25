@@ -1,7 +1,11 @@
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+// Default RELATIVE (same-origin): Next.js /api/* ko backend pe proxy karta hai.
+// Is liye browser ko backend ka IP/host pata hona ZARURI NAHI — IP change pe rebuild nahi chahiye.
+// (Purana tareeqa: NEXT_PUBLIC_API_URL set karna — ab optional fallback hai.)
+const API = process.env.NEXT_PUBLIC_API_URL || "";
 
 async function req(path: string, opts: RequestInit = {}) {
   const r = await fetch(`${API}${path}`, {
+    credentials: "include", // session cookie har request ke sath (warna refresh = logout)
     ...opts,
     headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
   });
@@ -16,6 +20,12 @@ async function req(path: string, opts: RequestInit = {}) {
 
 export const api = {
   health: () => req("/api/health"),
+  signup: (b: any) => req("/api/auth/signup", { method: "POST", body: JSON.stringify(b) }),
+  login: (b: any) => req("/api/auth/login", { method: "POST", body: JSON.stringify(b) }),
+  google: (credential: string) => req("/api/auth/google", { method: "POST", body: JSON.stringify({ credential }) }),
+  me: () => req("/api/auth/me"),
+  logout: () => req("/api/auth/logout", { method: "POST", body: "{}" }),
+  authConfig: () => req("/api/auth/config"),
   connect: (token: string, business_id: string) =>
     req("/api/connect", { method: "POST", body: JSON.stringify({ token, business_id }) }),
   disconnect: () => req("/api/disconnect", { method: "POST" }),
@@ -38,6 +48,7 @@ export const api = {
     new Promise<any>((resolve, reject) => {
       const x = new XMLHttpRequest();
       x.open("POST", `${API}/api/posts`);
+      x.withCredentials = true;
       x.upload.onprogress = (e) => { if (e.lengthComputable) onp(Math.round((e.loaded / e.total) * 100)); };
       x.onload = () => {
         try {
@@ -68,6 +79,7 @@ export const api = {
   topPosts: (pageId: string, sort = "reach") => req(`/api/fb/${pageId}/top-posts?sort=${sort}`),
   overview: (range = 28) => req(`/api/overview?range=${range}`),
   viralGlobal: (limit = 10) => req(`/api/viral-global?limit=${limit}`),
+  history: (range = 28, pageId = "") => req(`/api/history?range=${range}${pageId ? `&page_id=${pageId}` : ""}`),
   logs: () => req("/api/logs"),
   tokenHealth: () => req("/api/token/health"),
 };
